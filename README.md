@@ -1,7 +1,7 @@
 # Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü Ders Programı
 
-Bu depo, Kastamonu Üniversitesi Orman Fakültesi Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü haftalık ders programı hazırlama arayüzünü içerir.
+Bu depo, Kastamonu Üniversitesi Orman Fakültesi Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü ders programı hazırlama ve akademik görevlendirme sistemi için hazırlanmıştır.
 
-Ana sayfa: `index.html`
+Yayın adresi:
 
-Ortak kullanım için `firebase-config.js` dosyasındaki Firebase bilgileri tanımlanmalı, `firestore.rules` Firestore Rules bölümüne yüklenmeli ve `functions` klasöründeki `createInstructor` fonksiyonu Firebase Functions olarak dağıtılmalıdır.
+https://eakturkphd.github.io/dkbydepo/

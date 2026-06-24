@@ -1,6 +1,6 @@
 // Firebase yapılandırması
-// GitHub Pages üzerinde ortak kullanıcı yönetimi ve ortak ders programı için Firebase kullanılmalıdır.
-// Kullanıcı adıyla girişte sistem, kullanıcı adını aşağıdaki kurumsal sanal alan adıyla e-posta formatına çevirir.
+// Ortak kullanıcı yönetimi ve ortak ders programı verisi Firebase Authentication + Firestore ile yürütülür.
+// GitHub Pages yalnızca arayüz dosyalarını yayınlar.
 
 export const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
@@ -11,13 +11,10 @@ export const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
-// İlk yetkili kullanıcı Firebase Authentication içinde manuel oluşturulduktan sonra
-// bu listeye ilgili e-posta/sanal e-posta yazılır. Örn: "admin@dkby.kastamonu.edu.tr"
 export const adminEmails = [
   "admin@dkby.kastamonu.edu.tr"
 ];
 
-// Kullanıcı adı "ayse.yilmaz" ise Firebase Auth e-postası "ayse.yilmaz@dkby.kastamonu.edu.tr" olur.
 export const authEmailDomain = "dkby.kastamonu.edu.tr";
 
 export const functionRegion = "europe-west1";

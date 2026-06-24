@@ -3,13 +3,13 @@ import { COURSES, ROOMS, DAYS, SLOTS } from "./data/courses.js";
 
 const $ = (id) => document.getElementById(id);
 const CONFIGURED = Boolean(firebaseConfig?.apiKey) && !firebaseConfig.apiKey.includes("YOUR_") && !firebaseConfig.projectId.includes("YOUR_");
-const LOCAL_KEY = "dkb_schedule_v3_local";
+const LOCAL_KEY = "dkb_schedule_v4_local";
 const DEFAULT_ADMIN_EMAIL = `admin@${authEmailDomain || "dkby.kastamonu.edu.tr"}`;
 const DEFAULT_ADMIN = {
   id: "admin",
   username: "admin",
   email: DEFAULT_ADMIN_EMAIL,
-  password: "DKB2026!",
+  password: "dkby2026",
   displayName: "Yetkili Kullanıcı",
   title: "Bölüm Başkanı",
   role: "admin"
@@ -79,6 +79,8 @@ function normalizeStore(parsed = {}) {
   const base = initialStore();
   const map = new Map(base.users.map(u => [u.id, u]));
   (parsed.users || []).forEach(u => map.set(u.id, { ...u }));
+  const admin = { ...(map.get("admin") || {}), ...DEFAULT_ADMIN };
+  map.set("admin", admin);
   return {
     users: [...map.values()],
     assignments: parsed.assignments || {},
@@ -165,7 +167,7 @@ function teacherName(id) {
 
 function visibleTeachers() {
   return state.users
-    .filter(u => u.role === "teacher" || u.role === "admin")
+    .filter(u => u.role === "teacher")
     .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || "", "tr"));
 }
 
@@ -454,38 +456,139 @@ async function setCourseParts(courseId, raw) {
   toast("Ders blok yapısı güncellendi.", "success");
 }
 
-function selectedAdminCourseIds() {
-  return [...document.querySelectorAll("[data-new-user-course]:checked")].map(el => el.value);
+function instructorPayloadFromForm(form) {
+  const userId = form.userId?.value?.trim() || "";
+  return {
+    userId,
+    displayName: form.displayName.value.trim(),
+    title: form.title.value.trim(),
+    username: slugUsername(form.username.value),
+    password: form.password.value
+  };
+}
+
+function validateInstructorPayload(payload, isEdit = false) {
+  if (!payload.displayName) throw new Error("Ad soyad alanı zorunludur.");
+  if (!payload.username || payload.username.length < 3) throw new Error("Kullanıcı adı en az üç karakter olmalıdır.");
+  if (!isEdit && (!payload.password || payload.password.length < 6)) throw new Error("Şifre en az altı karakter olmalıdır.");
+  if (isEdit && payload.password && payload.password.length < 6) throw new Error("Şifre en az altı karakter olmalıdır.");
 }
 
 async function createInstructor(form) {
   if (!isAdmin()) throw new Error("Bu işlem yetkili kullanıcı tarafından yapılabilir.");
-  const displayName = form.displayName.value.trim();
-  const title = form.title.value.trim();
-  const username = slugUsername(form.username.value);
-  const password = form.password.value;
-  const courseIds = selectedAdminCourseIds();
-
-  if (!displayName) throw new Error("Ad soyad alanı zorunludur.");
-  if (!username || username.length < 3) throw new Error("Kullanıcı adı en az üç karakter olmalıdır.");
-  if (!password || password.length < 6) throw new Error("Şifre en az altı karakter olmalıdır.");
+  const payload = instructorPayloadFromForm(form);
+  validateInstructorPayload(payload, false);
+  const { displayName, title, username, password } = payload;
 
   if (state.mode === "firebase" && fb) {
     const call = fb.httpsCallable(fb.functions, "createInstructor");
-    await call({ displayName, title, username, password, courseIds });
+    await call({ displayName, title, username, password });
   } else {
     const store = getLocalStore();
     const id = username;
     const email = usernameToEmail(username);
+    const exists = store.users.some(u => u.id === id || u.username === username || u.email === email);
+    if (exists) throw new Error("Bu kullanıcı adı daha önce tanımlanmıştır.");
     const user = { id, username, email, password, displayName, title, role: "teacher" };
-    const index = store.users.findIndex(u => u.id === id || u.username === username || u.email === email);
-    if (index >= 0) store.users[index] = { ...store.users[index], ...user };
-    else store.users.push(user);
-    courseIds.forEach(courseId => { store.assignments[courseId] = id; });
+    store.users.push(user);
     setLocalStore(store);
   }
   await loadData();
-  toast("Öğretim üyesi kaydı ve ders atamaları tamamlandı.", "success");
+  toast("Öğretim üyesi kaydı tamamlandı.", "success");
+}
+
+async function updateInstructor(form) {
+  if (!isAdmin()) throw new Error("Bu işlem yetkili kullanıcı tarafından yapılabilir.");
+  const payload = instructorPayloadFromForm(form);
+  validateInstructorPayload(payload, true);
+  if (!payload.userId) throw new Error("Güncellenecek öğretim üyesi belirlenemedi.");
+
+  if (state.mode === "firebase" && fb) {
+    const call = fb.httpsCallable(fb.functions, "updateInstructor");
+    await call(payload);
+  } else {
+    const store = getLocalStore();
+    const idx = store.users.findIndex(u => u.id === payload.userId && u.role === "teacher");
+    if (idx < 0) throw new Error("Öğretim üyesi kaydı bulunamadı.");
+    const duplicate = store.users.some(u => u.id !== payload.userId && (u.username === payload.username || u.email === usernameToEmail(payload.username)));
+    if (duplicate) throw new Error("Bu kullanıcı adı başka bir öğretim üyesi tarafından kullanılmaktadır.");
+    const current = store.users[idx];
+    store.users[idx] = {
+      ...current,
+      username: payload.username,
+      email: usernameToEmail(payload.username),
+      displayName: payload.displayName,
+      title: payload.title,
+      ...(payload.password ? { password: payload.password } : {})
+    };
+    setLocalStore(store);
+  }
+  await loadData();
+  toast("Öğretim üyesi bilgileri güncellendi.", "success");
+}
+
+async function deleteInstructor(userId) {
+  if (!isAdmin()) throw new Error("Bu işlem yetkili kullanıcı tarafından yapılabilir.");
+  const instructor = state.users.find(u => u.id === userId && u.role === "teacher");
+  if (!instructor) throw new Error("Öğretim üyesi kaydı bulunamadı.");
+
+  const assignedCount = Object.values(state.assignments).filter(id => id === userId).length;
+  const bookingCount = state.bookings.filter(b => b.teacherId === userId).length;
+  const message = assignedCount || bookingCount
+    ? `${teacherName(userId)} kaydı kaldırılacak. Bu işlem ilgili ${assignedCount} ders atamasını ve ${bookingCount} program kaydını da temizleyecektir. Devam edilsin mi?`
+    : `${teacherName(userId)} kaydı kaldırılacak. Devam edilsin mi?`;
+  if (!confirm(message)) return;
+
+  if (state.mode === "firebase" && fb) {
+    const call = fb.httpsCallable(fb.functions, "deleteInstructor");
+    await call({ userId });
+  } else {
+    const store = getLocalStore();
+    store.users = store.users.filter(u => u.id !== userId);
+    Object.keys(store.assignments).forEach(courseId => {
+      if (store.assignments[courseId] === userId) delete store.assignments[courseId];
+    });
+    store.bookings = store.bookings.filter(b => b.teacherId !== userId);
+    setLocalStore(store);
+  }
+  state.activePlacement = null;
+  await loadData();
+  toast("Öğretim üyesi kaydı kaldırıldı.", "success");
+}
+
+function resetInstructorForm() {
+  const form = document.querySelector("#createInstructorForm");
+  if (!form) return;
+  form.reset();
+  form.userId.value = "";
+  form.password.required = true;
+  form.password.placeholder = "En az 6 karakter";
+  const title = form.querySelector("[data-form-title]");
+  const button = form.querySelector("[data-save-instructor]");
+  const cancel = form.querySelector("[data-action='cancel-instructor-edit']");
+  if (title) title.textContent = "Öğretim üyesi tanımlama";
+  if (button) button.textContent = "Öğretim üyesini kaydet";
+  if (cancel) cancel.classList.add("hidden");
+}
+
+function fillInstructorForm(userId) {
+  const form = document.querySelector("#createInstructorForm");
+  const instructor = state.users.find(u => u.id === userId && u.role === "teacher");
+  if (!form || !instructor) return;
+  form.userId.value = instructor.id;
+  form.title.value = instructor.title || "";
+  form.displayName.value = instructor.displayName || "";
+  form.username.value = instructor.username || emailToUsername(instructor.email) || "";
+  form.password.value = "";
+  form.password.required = false;
+  form.password.placeholder = "Değişmeyecekse boş bırakınız";
+  const title = form.querySelector("[data-form-title]");
+  const button = form.querySelector("[data-save-instructor]");
+  const cancel = form.querySelector("[data-action='cancel-instructor-edit']");
+  if (title) title.textContent = "Öğretim üyesi bilgilerini düzenleme";
+  if (button) button.textContent = "Bilgileri güncelle";
+  if (cancel) cancel.classList.remove("hidden");
+  form.scrollIntoView({ behavior: "smooth", block: "center" });
 }
 
 async function loadData() {
@@ -565,7 +668,6 @@ function semesterOptions(selected = state.selectedSemester) {
 function renderLogin() {
   $("loginPanel").classList.remove("hidden");
   $("appPanel").classList.add("hidden");
-  $("setupNotice").classList.toggle("hidden", state.mode !== "local");
 }
 
 function render() {
@@ -573,7 +675,7 @@ function render() {
   $("loginPanel").classList.add("hidden");
   $("appPanel").classList.remove("hidden");
   $("userBadge").textContent = `${teacherName(state.user.id)} · ${state.user.role === "admin" ? "Yetkili kullanıcı" : "Öğretim üyesi"}`;
-  $("systemBadge").textContent = state.mode === "firebase" ? "Ortak veri tabanı" : "Yerel kurulum denetimi";
+  $("systemBadge").textContent = state.mode === "firebase" ? "Ortak veri tabanı" : "Yerel kayıt";
   renderFilters();
   renderStats();
   renderAdmin();
@@ -628,8 +730,12 @@ function renderAdmin() {
       <div>
         <strong>${escapeHtml(teacherName(u.id))}</strong>
         <span>${escapeHtml(u.username || emailToUsername(u.email) || u.id)}</span>
+        <div class="teacherCourseCodes">${assignedCodes.length ? assignedCodes.map(code => `<em>${code}</em>`).join("") : `<small>Atama yok</small>`}</div>
       </div>
-      <div class="teacherCourseCodes">${assignedCodes.length ? assignedCodes.map(code => `<em>${code}</em>`).join("") : `<small>Atama yok</small>`}</div>
+      <div class="teacherActions">
+        <button type="button" class="mini" data-action="edit-instructor" data-user-id="${escapeHtml(u.id)}">Düzenle</button>
+        <button type="button" class="mini danger" data-action="delete-instructor" data-user-id="${escapeHtml(u.id)}">Kaldır</button>
+      </div>
     </div>`;
   }).join("");
 
@@ -644,11 +750,6 @@ function renderAdmin() {
     </tr>`;
   }).join("");
 
-  const courseChecks = semesterCourses.map(c => `<label class="checkLine">
-    <input type="checkbox" value="${c.id}" data-new-user-course>
-    <span><strong>${c.code}</strong> ${escapeHtml(c.name)} <small>${c.electiveGroup ? escapeHtml(c.electiveGroup) : "Zorunlu"}</small></span>
-  </label>`).join("");
-
   panel.innerHTML = `
     <section class="card adminCard">
       <div class="sectionHead compactHead">
@@ -660,16 +761,18 @@ function renderAdmin() {
 
       <div class="adminGrid">
         <form id="createInstructorForm" class="adminBox stackForm">
-          <h3>Öğretim üyesi tanımlama</h3>
+          <input type="hidden" name="userId" />
+          <h3 data-form-title>Öğretim üyesi tanımlama</h3>
           <div class="formGrid">
             <label>Unvan<input name="title" placeholder="Dr. Öğr. Üyesi"></label>
             <label>Ad soyad<input name="displayName" required placeholder="Ad Soyad"></label>
             <label>Kullanıcı adı<input name="username" required placeholder="ornek.kullanici"></label>
             <label>Şifre<input name="password" type="password" required minlength="6" placeholder="En az 6 karakter"></label>
           </div>
-          <label>İlk ders atamaları · seçili yarıyıl</label>
-          <div class="checkGrid">${courseChecks}</div>
-          <button class="primary" type="submit">Öğretim üyesini kaydet</button>
+          <div class="formActions">
+            <button class="primary" type="submit" data-save-instructor>Öğretim üyesini kaydet</button>
+            <button class="ghost hidden" type="button" data-action="cancel-instructor-edit">Vazgeç</button>
+          </div>
         </form>
 
         <div class="adminBox">
@@ -812,6 +915,15 @@ async function handleClick(event) {
       const input = document.querySelector(`[data-part-input="${item.dataset.courseId}"]`);
       await setCourseParts(item.dataset.courseId, input.value);
     }
+    if (action === "edit-instructor") {
+      fillInstructorForm(item.dataset.userId);
+    }
+    if (action === "cancel-instructor-edit") {
+      resetInstructorForm();
+    }
+    if (action === "delete-instructor") {
+      await deleteInstructor(item.dataset.userId);
+    }
   } catch (err) {
     console.error(err);
     toast(err.message || "İşlem gerçekleştirilemedi.", "error");
@@ -842,11 +954,12 @@ async function handleSubmit(event) {
   if (!form) return;
   event.preventDefault();
   try {
-    await createInstructor(form);
-    form.reset();
+    if (form.userId.value) await updateInstructor(form);
+    else await createInstructor(form);
+    resetInstructorForm();
   } catch (err) {
     console.error(err);
-    toast(err.message || "Öğretim üyesi kaydı tamamlanamadı.", "error");
+    toast(err.message || "Öğretim üyesi işlemi tamamlanamadı.", "error");
   }
 }
 
@@ -889,7 +1002,7 @@ async function init() {
   try {
     await initFirebaseIfConfigured();
   } catch (err) {
-    console.warn("Firebase başlatılamadı. Yerel kurulum denetimi moduna geçildi.", err);
+    console.warn("Firebase başlatılamadı. Yerel kayıt moduna geçildi.", err);
     state.mode = "local";
   }
   bindEvents();
