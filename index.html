@@ -8,66 +8,110 @@
 </head>
 <body>
   <header class="hero">
-    <div>
-      <h1>Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü</h1>
-      <p>Ders programı yerleştirme deneme sayfası</p>
+    <div class="heroOverlay"></div>
+    <div class="heroContent">
+      <div class="brandMark">DKB</div>
+      <div>
+        <p class="eyebrow">Kastamonu Üniversitesi · Orman Fakültesi</p>
+        <h1>Doğa Koruma ve Biyoçeşitlilik Yönetimi</h1>
+        <p class="heroText">Ders atama ve haftalık program yerleştirme sistemi</p>
+      </div>
     </div>
-    <span id="modeBadge" class="badge">Demo</span>
+    <div class="heroActions">
+      <span id="modeBadge" class="badge">Demo</span>
+      <a class="ghostLink" href="README.md" target="_blank" rel="noopener">Kurulum notları</a>
+    </div>
   </header>
 
   <main>
-    <section id="loginPanel" class="panel loginPanel">
-      <h2>Giriş</h2>
-      <p class="muted">Firebase ayarları yapılmadan sistem demo modda çalışır. Gerçek çok kullanıcılı kullanım için Firebase Auth + Firestore bağlanmalıdır.</p>
-      <form id="loginForm">
-        <label for="loginUser">Kullanıcı adı / e-posta</label>
-        <input id="loginUser" autocomplete="username" required placeholder="admin veya e-posta" />
-        <label for="loginPass">Şifre</label>
-        <input id="loginPass" type="password" autocomplete="current-password" required placeholder="Şifre" />
-        <button class="primary" type="submit">Giriş yap</button>
-      </form>
-      <div id="demoInfo" class="demoBox">
-        <strong>Demo kullanıcıları</strong><br>
-        Yetkili: <code>admin</code> / <code>DKB2026!</code><br>
-        Hoca: <code>hoca1</code>, <code>hoca2</code>, <code>hoca3</code> / <code>123456</code>
+    <section id="loginPanel" class="loginShell">
+      <div class="loginCard panel">
+        <div class="loginHeader">
+          <div>
+            <p class="eyebrow dark">Güvenli giriş</p>
+            <h2>Ders programı sistemine giriş</h2>
+          </div>
+          <span class="lockIcon" aria-hidden="true">⌁</span>
+        </div>
+        <p class="muted">Yetkili kullanıcı ders-hoca atamalarını yapar. Hocalar yalnızca kendilerine atanmış dersleri programa yerleştirir.</p>
+        <form id="loginForm" class="stackForm">
+          <label for="loginUser">Kullanıcı adı / e-posta</label>
+          <input id="loginUser" autocomplete="username" required placeholder="admin veya e-posta" />
+          <label for="loginPass">Şifre</label>
+          <input id="loginPass" type="password" autocomplete="current-password" required placeholder="Şifre" />
+          <button class="primary wide" type="submit">Giriş yap</button>
+        </form>
+        <div id="demoInfo" class="demoBox">
+          <strong>Demo girişleri</strong><br>
+          Yetkili: <code>admin</code> / <code>DKB2026!</code><br>
+          Hoca: <code>hoca1</code>, <code>hoca2</code>, <code>hoca3</code> / <code>123456</code>
+        </div>
+      </div>
+
+      <div class="loginInfo panel">
+        <h3>Bu sürümde eklenenler</h3>
+        <ul class="checkList">
+          <li>Admin hoca ekleyebilir ve ders ataması yapabilir.</li>
+          <li>Firebase Functions kurulduğunda hocaya davet e-postası gider.</li>
+          <li>Hoca davet linkinden kendi şifresini belirler.</li>
+          <li>Ders yerleştirme tablo hücresine tıklayarak yapılabilir.</li>
+          <li>Seçmeli havuz dersleri aynı zaman dilimine otomatik yerleşir.</li>
+        </ul>
       </div>
     </section>
 
     <section id="appPanel" class="hidden">
-      <div class="topbar">
+      <div class="topbar panel compactPanel">
         <div>
-          <span id="userBadge" class="badge"></span>
-          <span id="backendBadge" class="badge soft"></span>
+          <span id="userBadge" class="badge soft"></span>
+          <span id="backendBadge" class="badge outline"></span>
+          <span id="activePlacementBadge" class="badge active hidden"></span>
         </div>
-        <div>
-          <button id="refreshBtn">Yenile</button>
-          <button id="logoutBtn">Çıkış</button>
+        <div class="buttonRow">
+          <button id="refreshBtn" type="button">Yenile</button>
+          <button id="logoutBtn" type="button">Çıkış</button>
         </div>
       </div>
 
+      <section class="statsGrid" id="statsGrid"></section>
+
       <section class="panel filters">
-        <label>Yarıyıl / sınıf</label>
-        <select id="semesterFilter"></select>
-        <label>Derslik görünümü</label>
-        <select id="roomFilter"></select>
+        <div>
+          <label for="semesterFilter">Yarıyıl / sınıf</label>
+          <select id="semesterFilter"></select>
+        </div>
+        <div>
+          <label for="roomFilter">Derslik görünümü</label>
+          <select id="roomFilter"></select>
+        </div>
       </section>
 
       <section id="adminPanel" class="panel hidden"></section>
 
       <section class="panel">
-        <h2>Ders yerleştirme</h2>
-        <p class="muted">Dersler T+U toplam süresi kadar tek blok halinde yerleştirilir. Öğle arası geçilemez. Seçmeli havuzdaki dersler aynı gün/saatte farklı dersliklere otomatik atanır.</p>
+        <div class="sectionHead">
+          <div>
+            <h2>Ders yerleştirme</h2>
+            <p class="muted">Önce bir ders/parça seçin, ardından haftalık program tablosunda uygun boş hücreye tıklayın. İsterseniz kart içindeki hızlı seçim alanlarını da kullanabilirsiniz.</p>
+          </div>
+          <button id="clearActiveBtn" class="small" type="button">Aktif seçimi temizle</button>
+        </div>
         <div id="myCourses"></div>
       </section>
 
-      <section class="panel">
-        <h2>Haftalık program</h2>
+      <section class="panel schedulePanel">
+        <div class="sectionHead">
+          <div>
+            <h2>Haftalık program</h2>
+            <p class="muted">Boş hücreler seçili ders için tıklanabilir. Dolu hücreler first come first serve mantığıyla kilitlenir.</p>
+          </div>
+        </div>
         <div id="scheduleGrid"></div>
       </section>
     </section>
   </main>
 
-  <div id="toast" class="toast"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script type="module" src="app.js"></script>
 </body>
 </html>

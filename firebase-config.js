@@ -11,7 +11,10 @@ export const firebaseConfig = {
   appId: "YOUR_APP_ID"
 };
 
-// İlk kurulum kolaylığı için. Güvenlik için nihai sürümde admin yetkisi Firestore users koleksiyonunda tutulmalıdır.
+// İlk kurulum kolaylığı için. Nihai sürümde admin yetkisi Firestore users koleksiyonunda tutulmalıdır.
 export const adminEmails = [
   "emre.akturk@kastamonu.edu.tr"
 ];
+
+// Cloud Functions bölgesi. functions/index.js içindeki bölge ile aynı olmalı.
+export const functionRegion = "europe-west1";

@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DKB Davet Kabul</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero slimHero">
+    <div class="heroOverlay"></div>
+    <div class="heroContent">
+      <div class="brandMark">DKB</div>
+      <div>
+        <p class="eyebrow">Davet bağlantısı</p>
+        <h1>Hesap oluşturma</h1>
+        <p class="heroText">Ders programı sistemine erişim için şifrenizi belirleyin.</p>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="loginShell single">
+      <div class="loginCard panel">
+        <div class="loginHeader">
+          <div>
+            <p class="eyebrow dark">Yeni kullanıcı</p>
+            <h2>Şifre belirle</h2>
+          </div>
+          <span class="lockIcon" aria-hidden="true">⌁</span>
+        </div>
+        <p id="inviteStatus" class="muted">Davet bağlantısı kontrol ediliyor.</p>
+        <form id="acceptInviteForm" class="stackForm hidden">
+          <label for="newPassword">Yeni şifre</label>
+          <input id="newPassword" type="password" minlength="6" autocomplete="new-password" required placeholder="En az 6 karakter" />
+          <label for="newPasswordAgain">Yeni şifre tekrar</label>
+          <input id="newPasswordAgain" type="password" minlength="6" autocomplete="new-password" required placeholder="Şifreyi tekrar yazın" />
+          <button class="primary wide" type="submit">Hesabı oluştur</button>
+        </form>
+        <p class="muted smallText">Hesap oluşturulduktan sonra ana giriş sayfasına yönlendirileceksiniz.</p>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="accept-invite.js"></script>
+</body>
+</html>
