@@ -1,0 +1,49 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function isAdmin() {
+      return signedIn() && userDoc().data.role == 'admin';
+    }
+
+    function isTeacherOrAdmin() {
+      return signedIn() && userDoc().data.role in ['teacher', 'admin'];
+    }
+
+    match /users/{uid} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /assignments/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /courseParts/{id} {
+      allow read: if signedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /bookings/{id} {
+      allow read: if signedIn();
+      allow create: if isTeacherOrAdmin();
+      allow delete: if isAdmin() || (signedIn() && resource.data.teacherId == request.auth.uid);
+      allow update: if false;
+    }
+
+    match /occupancy/{id} {
+      allow read: if signedIn();
+      allow create: if isTeacherOrAdmin();
+      allow delete: if isAdmin();
+      allow update: if false;
+    }
+  }
+}

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DKB Ders Programı</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <h1>Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü</h1>
+      <p>Ders programı yerleştirme deneme sayfası</p>
+    </div>
+    <span id="modeBadge" class="badge">Demo</span>
+  </header>
+
+  <main>
+    <section id="loginPanel" class="panel loginPanel">
+      <h2>Giriş</h2>
+      <p class="muted">Firebase ayarları yapılmadan sistem demo modda çalışır. Gerçek çok kullanıcılı kullanım için Firebase Auth + Firestore bağlanmalıdır.</p>
+      <form id="loginForm">
+        <label for="loginUser">Kullanıcı adı / e-posta</label>
+        <input id="loginUser" autocomplete="username" required placeholder="admin veya e-posta" />
+        <label for="loginPass">Şifre</label>
+        <input id="loginPass" type="password" autocomplete="current-password" required placeholder="Şifre" />
+        <button class="primary" type="submit">Giriş yap</button>
+      </form>
+      <div id="demoInfo" class="demoBox">
+        <strong>Demo kullanıcıları</strong><br>
+        Yetkili: <code>admin</code> / <code>DKB2026!</code><br>
+        Hoca: <code>hoca1</code>, <code>hoca2</code>, <code>hoca3</code> / <code>123456</code>
+      </div>
+    </section>
+
+    <section id="appPanel" class="hidden">
+      <div class="topbar">
+        <div>
+          <span id="userBadge" class="badge"></span>
+          <span id="backendBadge" class="badge soft"></span>
+        </div>
+        <div>
+          <button id="refreshBtn">Yenile</button>
+          <button id="logoutBtn">Çıkış</button>
+        </div>
+      </div>
+
+      <section class="panel filters">
+        <label>Yarıyıl / sınıf</label>
+        <select id="semesterFilter"></select>
+        <label>Derslik görünümü</label>
+        <select id="roomFilter"></select>
+      </section>
+
+      <section id="adminPanel" class="panel hidden"></section>
+
+      <section class="panel">
+        <h2>Ders yerleştirme</h2>
+        <p class="muted">Dersler T+U toplam süresi kadar tek blok halinde yerleştirilir. Öğle arası geçilemez. Seçmeli havuzdaki dersler aynı gün/saatte farklı dersliklere otomatik atanır.</p>
+        <div id="myCourses"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Haftalık program</h2>
+        <div id="scheduleGrid"></div>
+      </section>
+    </section>
+  </main>
+
+  <div id="toast" class="toast"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
