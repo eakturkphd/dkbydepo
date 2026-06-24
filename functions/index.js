@@ -1,143 +1,98 @@
-const crypto = require("crypto");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { setGlobalOptions } = require("firebase-functions/v2");
 const admin = require("firebase-admin");
-const sgMail = require("@sendgrid/mail");
 
 admin.initializeApp();
-setGlobalOptions({ region: process.env.FUNCTION_REGION || "europe-west1" });
-
 const db = admin.firestore();
-const SITE_URL = (process.env.SITE_URL || "https://eakturkphd.github.io/dkbydepo").replace(/\/$/, "");
-const FROM_EMAIL = process.env.FROM_EMAIL || "noreply@example.com";
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY || "";
+const AUTH_EMAIL_DOMAIN = "dkby.kastamonu.edu.tr";
 
-if (SENDGRID_API_KEY) sgMail.setApiKey(SENDGRID_API_KEY);
-
-function cleanString(value, max = 200) {
-  return String(value || "").trim().slice(0, max);
+function normalizeUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("ı", "i")
+    .replaceAll("ğ", "g")
+    .replaceAll("ü", "u")
+    .replaceAll("ş", "s")
+    .replaceAll("ö", "o")
+    .replaceAll("ç", "c")
+    .replace(/[^a-z0-9._-]/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
 }
 
-function isEmail(value) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+function usernameToEmail(username) {
+  const value = String(username || "").trim().toLowerCase();
+  return value.includes("@") ? value : `${value}@${AUTH_EMAIL_DOMAIN}`;
 }
 
-async function assertAdmin(context) {
-  const uid = context.auth?.uid;
-  if (!uid) throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
-  const userSnap = await db.collection("users").doc(uid).get();
-  if (!userSnap.exists || userSnap.data().role !== "admin") {
-    throw new HttpsError("permission-denied", "Bu işlem için admin yetkisi gerekir.");
+async function requireAdmin(uid) {
+  if (!uid) throw new HttpsError("unauthenticated", "Oturum doğrulanamadı.");
+  const snap = await db.collection("users").doc(uid).get();
+  if (!snap.exists || snap.data().role !== "admin") {
+    throw new HttpsError("permission-denied", "Bu işlem yalnızca yetkili kullanıcı tarafından yapılabilir.");
   }
-  return { uid, ...userSnap.data() };
+  return snap.data();
 }
 
-async function sendInviteEmail({ to, displayName, inviteLink, courseIds }) {
-  if (!SENDGRID_API_KEY) return { emailSent: false, reason: "SENDGRID_API_KEY tanımlı değil." };
-  const courseText = Array.isArray(courseIds) && courseIds.length ? courseIds.join(", ") : "Henüz ders ataması yok";
-  const subject = "DKB Ders Programı Sistemi Daveti";
-  const text = `Sayın ${displayName},\n\nDoğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü ders programı sistemine davet edildiniz.\n\nAtanan dersler: ${courseText}\n\nŞifrenizi belirlemek ve sisteme giriş yapmak için bağlantı:\n${inviteLink}\n\nBu bağlantı 7 gün geçerlidir.`;
-  const html = `
-    <p>Sayın <strong>${displayName}</strong>,</p>
-    <p>Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü ders programı sistemine davet edildiniz.</p>
-    <p><strong>Atanan dersler:</strong> ${courseText}</p>
-    <p><a href="${inviteLink}" style="display:inline-block;padding:12px 16px;background:#1f6f4a;color:#fff;text-decoration:none;border-radius:8px;font-weight:700">Şifremi belirle</a></p>
-    <p>Bağlantı çalışmazsa aşağıdaki adresi tarayıcınıza kopyalayın:</p>
-    <p>${inviteLink}</p>
-    <p>Bu bağlantı 7 gün geçerlidir.</p>`;
-  await sgMail.send({ to, from: FROM_EMAIL, subject, text, html });
-  return { emailSent: true };
-}
+exports.createInstructor = onCall({ region: "europe-west1" }, async (request) => {
+  await requireAdmin(request.auth && request.auth.uid);
 
-exports.inviteTeacher = onCall({ cors: true }, async (request) => {
-  const adminUser = await assertAdmin(request);
-  const displayName = cleanString(request.data?.displayName, 120);
-  const title = cleanString(request.data?.title, 80);
-  const email = cleanString(request.data?.email, 160).toLowerCase();
-  const courseIds = Array.isArray(request.data?.courseIds)
-    ? request.data.courseIds.map(x => cleanString(x, 40)).filter(Boolean)
-    : [];
+  const data = request.data || {};
+  const displayName = String(data.displayName || "").trim();
+  const title = String(data.title || "").trim();
+  const username = normalizeUsername(data.username);
+  const password = String(data.password || "");
+  const courseIds = Array.isArray(data.courseIds) ? data.courseIds.map(String) : [];
 
-  if (!displayName) throw new HttpsError("invalid-argument", "Ad soyad zorunludur.");
-  if (!isEmail(email)) throw new HttpsError("invalid-argument", "Geçerli e-posta adresi girilmelidir.");
+  if (!displayName) throw new HttpsError("invalid-argument", "Ad soyad alanı zorunludur.");
+  if (!username || username.length < 3) throw new HttpsError("invalid-argument", "Kullanıcı adı en az üç karakter olmalıdır.");
+  if (!password || password.length < 6) throw new HttpsError("invalid-argument", "Şifre en az altı karakter olmalıdır.");
 
-  const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = admin.firestore.Timestamp.fromDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
-  const inviteLink = `${SITE_URL}/accept-invite.html?token=${token}`;
-
-  await db.collection("invitations").doc(token).set({
-    email,
-    displayName,
-    title,
-    courseIds,
-    invitedBy: adminUser.uid,
-    status: "pending",
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    expiresAt
-  });
-
-  const emailResult = await sendInviteEmail({ to: email, displayName, inviteLink, courseIds });
-  await db.collection("invitations").doc(token).set({ emailSent: !!emailResult.emailSent, emailSendReason: emailResult.reason || null }, { merge: true });
-
-  return { inviteLink, emailSent: !!emailResult.emailSent, reason: emailResult.reason || null };
-});
-
-exports.acceptInvite = onCall({ cors: true }, async (request) => {
-  const token = cleanString(request.data?.token, 128);
-  const password = String(request.data?.password || "");
-  if (!token) throw new HttpsError("invalid-argument", "Davet token bilgisi eksik.");
-  if (password.length < 6) throw new HttpsError("invalid-argument", "Şifre en az 6 karakter olmalıdır.");
-
-  const inviteRef = db.collection("invitations").doc(token);
-  const inviteSnap = await inviteRef.get();
-  if (!inviteSnap.exists) throw new HttpsError("not-found", "Davet bulunamadı.");
-  const invite = inviteSnap.data();
-  if (invite.status === "accepted") throw new HttpsError("failed-precondition", "Bu davet daha önce kullanılmış.");
-  if (invite.expiresAt && invite.expiresAt.toMillis() < Date.now()) throw new HttpsError("deadline-exceeded", "Davet bağlantısının süresi dolmuş.");
-
+  const email = usernameToEmail(username);
   let userRecord;
   try {
-    userRecord = await admin.auth().getUserByEmail(invite.email);
+    userRecord = await admin.auth().getUserByEmail(email);
     userRecord = await admin.auth().updateUser(userRecord.uid, {
       password,
-      displayName: invite.displayName,
+      displayName,
       disabled: false
     });
-  } catch (err) {
-    if (err.code !== "auth/user-not-found") throw err;
+  } catch (error) {
+    if (error.code !== "auth/user-not-found") throw error;
     userRecord = await admin.auth().createUser({
-      email: invite.email,
+      email,
       password,
-      displayName: invite.displayName,
+      displayName,
+      emailVerified: true,
       disabled: false
     });
   }
 
   const batch = db.batch();
   batch.set(db.collection("users").doc(userRecord.uid), {
-    email: invite.email,
-    displayName: invite.displayName,
-    title: invite.title || "",
+    username,
+    email,
+    displayName,
+    title,
     role: "teacher",
-    createdFromInvite: true,
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    createdBy: request.auth.uid
   }, { merge: true });
 
-  for (const courseId of invite.courseIds || []) {
+  for (const courseId of courseIds) {
     batch.set(db.collection("assignments").doc(courseId), {
       courseId,
       teacherId: userRecord.uid,
-      updatedBy: invite.invitedBy || "invite",
+      updatedBy: request.auth.uid,
       updatedAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
   }
 
-  batch.set(inviteRef, {
-    status: "accepted",
-    acceptedAt: admin.firestore.FieldValue.serverTimestamp(),
-    acceptedUid: userRecord.uid
-  }, { merge: true });
-
   await batch.commit();
-  return { email: invite.email, uid: userRecord.uid };
+  return {
+    uid: userRecord.uid,
+    username,
+    displayName,
+    assignedCourseCount: courseIds.length
+  };
 });

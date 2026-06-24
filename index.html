@@ -3,115 +3,115 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DKB Ders Programı</title>
+  <title>Doğa Koruma ve Biyoçeşitlilik Yönetimi Ders Programı</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
   <header class="hero">
     <div class="heroOverlay"></div>
-    <div class="heroContent">
+    <div class="heroInner">
       <div class="brandMark">DKB</div>
       <div>
         <p class="eyebrow">Kastamonu Üniversitesi · Orman Fakültesi</p>
-        <h1>Doğa Koruma ve Biyoçeşitlilik Yönetimi</h1>
-        <p class="heroText">Ders atama ve haftalık program yerleştirme sistemi</p>
+        <h1>Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü</h1>
+        <p class="subtitle">Ders Programı Hazırlama ve Akademik Görevlendirme Sistemi</p>
       </div>
-    </div>
-    <div class="heroActions">
-      <span id="modeBadge" class="badge">Demo</span>
-      <a class="ghostLink" href="README.md" target="_blank" rel="noopener">Kurulum notları</a>
     </div>
   </header>
 
-  <main>
-    <section id="loginPanel" class="loginShell">
-      <div class="loginCard panel">
-        <div class="loginHeader">
-          <div>
-            <p class="eyebrow dark">Güvenli giriş</p>
-            <h2>Ders programı sistemine giriş</h2>
-          </div>
-          <span class="lockIcon" aria-hidden="true">⌁</span>
+  <main class="shell">
+    <section id="loginPanel" class="loginLayout">
+      <article class="loginIntro card glassCard">
+        <h2>Akademik ders programı yönetimi</h2>
+        <p>
+          Sistem; öğretim üyelerinin tanımlanması, ders-öğretim üyesi atamalarının yapılması
+          ve derslerin haftalık programa yerleştirilmesi amacıyla hazırlanmıştır.
+        </p>
+        <div class="featureList">
+          <span>Yetkili kullanıcı yönetimi</span>
+          <span>Ders-öğretim üyesi ataması</span>
+          <span>Çakışma kontrollü programlama</span>
+          <span>Seçmeli ders havuzu eşzamanlılığı</span>
         </div>
-        <p class="muted">Yetkili kullanıcı ders-hoca atamalarını yapar. Hocalar yalnızca kendilerine atanmış dersleri programa yerleştirir.</p>
+      </article>
+
+      <article class="card loginCard">
+        <h2>Sisteme giriş</h2>
+        <p class="muted">Yetkili kullanıcı veya öğretim üyesi hesabı ile giriş yapınız.</p>
         <form id="loginForm" class="stackForm">
-          <label for="loginUser">Kullanıcı adı / e-posta</label>
-          <input id="loginUser" autocomplete="username" required placeholder="admin veya e-posta" />
-          <label for="loginPass">Şifre</label>
-          <input id="loginPass" type="password" autocomplete="current-password" required placeholder="Şifre" />
+          <label>
+            Kullanıcı adı
+            <input id="loginUser" autocomplete="username" required placeholder="kullanici.adi" />
+          </label>
+          <label>
+            Şifre
+            <input id="loginPass" type="password" autocomplete="current-password" required placeholder="••••••••" />
+          </label>
           <button class="primary wide" type="submit">Giriş yap</button>
         </form>
-        <div id="demoInfo" class="demoBox">
-          <strong>Demo girişleri</strong><br>
-          Yetkili: <code>admin</code> / <code>DKB2026!</code><br>
-          Hoca: <code>hoca1</code>, <code>hoca2</code>, <code>hoca3</code> / <code>123456</code>
+        <div id="setupNotice" class="setupNotice hidden">
+          Firebase yapılandırması tamamlanmadığı için sistem yerel kurulum denetimi modunda açılmıştır.
+          Ortak kullanım için Firebase bilgilerinin tanımlanması gerekir.
         </div>
-      </div>
-
-      <div class="loginInfo panel">
-        <h3>Bu sürümde eklenenler</h3>
-        <ul class="checkList">
-          <li>Admin hoca ekleyebilir ve ders ataması yapabilir.</li>
-          <li>Firebase Functions kurulduğunda hocaya davet e-postası gider.</li>
-          <li>Hoca davet linkinden kendi şifresini belirler.</li>
-          <li>Ders yerleştirme tablo hücresine tıklayarak yapılabilir.</li>
-          <li>Seçmeli havuz dersleri aynı zaman dilimine otomatik yerleşir.</li>
-        </ul>
-      </div>
+      </article>
     </section>
 
     <section id="appPanel" class="hidden">
-      <div class="topbar panel compactPanel">
+      <div class="topBar card">
         <div>
-          <span id="userBadge" class="badge soft"></span>
-          <span id="backendBadge" class="badge outline"></span>
-          <span id="activePlacementBadge" class="badge active hidden"></span>
+          <p class="eyebrow">Oturum</p>
+          <h2 id="userBadge">—</h2>
         </div>
-        <div class="buttonRow">
-          <button id="refreshBtn" type="button">Yenile</button>
-          <button id="logoutBtn" type="button">Çıkış</button>
+        <div class="topActions">
+          <span id="systemBadge" class="statusBadge">—</span>
+          <button id="refreshBtn" class="ghost" type="button">Yenile</button>
+          <button id="logoutBtn" class="ghost dangerText" type="button">Çıkış</button>
         </div>
       </div>
 
-      <section class="statsGrid" id="statsGrid"></section>
+      <section id="statsGrid" class="statsGrid"></section>
 
-      <section class="panel filters">
-        <div>
-          <label for="semesterFilter">Yarıyıl / sınıf</label>
-          <select id="semesterFilter"></select>
-        </div>
-        <div>
-          <label for="roomFilter">Derslik görünümü</label>
-          <select id="roomFilter"></select>
-        </div>
-      </section>
+      <section id="adminPanel" class="adminPanel hidden"></section>
 
-      <section id="adminPanel" class="panel hidden"></section>
-
-      <section class="panel">
-        <div class="sectionHead">
+      <section class="workspace card">
+        <div class="sectionHead compactHead">
           <div>
+            <p class="eyebrow">Haftalık planlama</p>
             <h2>Ders yerleştirme</h2>
-            <p class="muted">Önce bir ders/parça seçin, ardından haftalık program tablosunda uygun boş hücreye tıklayın. İsterseniz kart içindeki hızlı seçim alanlarını da kullanabilirsiniz.</p>
           </div>
-          <button id="clearActiveBtn" class="small" type="button">Aktif seçimi temizle</button>
+          <div class="toolbar">
+            <label>
+              Yarıyıl
+              <select id="semesterFilter"></select>
+            </label>
+            <label>
+              Derslik
+              <select id="roomFilter"></select>
+            </label>
+            <button id="clearActiveBtn" class="ghost" type="button">Seçimi temizle</button>
+          </div>
         </div>
-        <div id="myCourses"></div>
-      </section>
 
-      <section class="panel schedulePanel">
-        <div class="sectionHead">
-          <div>
-            <h2>Haftalık program</h2>
-            <p class="muted">Boş hücreler seçili ders için tıklanabilir. Dolu hücreler first come first serve mantığıyla kilitlenir.</p>
-          </div>
+        <div id="activePlacementBadge" class="activePlacement hidden"></div>
+
+        <div class="placementLayout">
+          <aside class="courseSide">
+            <h3>Atanmış dersler</h3>
+            <p class="muted smallText">Yerleştirilecek dersi seçiniz, ardından program tablosundaki uygun boş hücreye tıklayınız.</p>
+            <div id="myCourses"></div>
+          </aside>
+          <section class="scheduleSide">
+            <div id="scheduleGrid" class="scheduleGrid"></div>
+          </section>
         </div>
-        <div id="scheduleGrid"></div>
       </section>
     </section>
   </main>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <footer class="footer">Kastamonu Üniversitesi · Doğa Koruma ve Biyoçeşitlilik Yönetimi Bölümü</footer>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

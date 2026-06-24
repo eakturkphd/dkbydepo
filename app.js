@@ -1,26 +1,29 @@
-import { firebaseConfig, adminEmails, functionRegion } from "./firebase-config.js";
+import { firebaseConfig, adminEmails, authEmailDomain, functionRegion } from "./firebase-config.js";
 import { COURSES, ROOMS, DAYS, SLOTS } from "./data/courses.js";
 
 const $ = (id) => document.getElementById(id);
-const PLACEHOLDER = !firebaseConfig.apiKey || firebaseConfig.apiKey.includes("YOUR_") || firebaseConfig.projectId.includes("YOUR_");
-const LS_KEY = "dkb_schedule_demo_v2";
-
-const DEMO_USERS = [
-  { id: "admin", username: "admin", email: "admin@demo.local", password: "DKB2026!", displayName: "Yetkili Kullanıcı", title: "Bölüm Başkanı", role: "admin" },
-  { id: "hoca1", username: "hoca1", email: "hoca1@demo.local", password: "123456", displayName: "Hoca 1", title: "Öğretim Elemanı", role: "teacher" },
-  { id: "hoca2", username: "hoca2", email: "hoca2@demo.local", password: "123456", displayName: "Hoca 2", title: "Öğretim Elemanı", role: "teacher" },
-  { id: "hoca3", username: "hoca3", email: "hoca3@demo.local", password: "123456", displayName: "Hoca 3", title: "Öğretim Elemanı", role: "teacher" }
-];
+const CONFIGURED = Boolean(firebaseConfig?.apiKey) && !firebaseConfig.apiKey.includes("YOUR_") && !firebaseConfig.projectId.includes("YOUR_");
+const LOCAL_KEY = "dkb_schedule_v3_local";
+const DEFAULT_ADMIN_EMAIL = `admin@${authEmailDomain || "dkby.kastamonu.edu.tr"}`;
+const DEFAULT_ADMIN = {
+  id: "admin",
+  username: "admin",
+  email: DEFAULT_ADMIN_EMAIL,
+  password: "DKB2026!",
+  displayName: "Yetkili Kullanıcı",
+  title: "Bölüm Başkanı",
+  role: "admin"
+};
 
 let fb = null;
-let state = {
-  mode: PLACEHOLDER ? "demo" : "firebase",
+
+const state = {
+  mode: CONFIGURED ? "firebase" : "local",
   user: null,
   users: [],
   assignments: {},
   courseParts: {},
   bookings: [],
-  invitations: [],
   selectedSemester: 1,
   selectedRoom: "ALL",
   activePlacement: null
@@ -35,96 +38,114 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function initialDemoStore() {
+function slugUsername(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll("ı", "i")
+    .replaceAll("ğ", "g")
+    .replaceAll("ü", "u")
+    .replaceAll("ş", "s")
+    .replaceAll("ö", "o")
+    .replaceAll("ç", "c")
+    .replace(/[^a-z0-9._-]/g, ".")
+    .replace(/\.+/g, ".")
+    .replace(/^\.|\.$/g, "");
+}
+
+function usernameToEmail(identifier) {
+  const clean = String(identifier || "").trim().toLowerCase();
+  if (clean.includes("@")) return clean;
+  const username = slugUsername(clean);
+  return `${username}@${authEmailDomain || "dkby.kastamonu.edu.tr"}`;
+}
+
+function emailToUsername(email) {
+  const suffix = `@${authEmailDomain || "dkby.kastamonu.edu.tr"}`;
+  const value = String(email || "").toLowerCase();
+  return value.endsWith(suffix) ? value.slice(0, -suffix.length) : value;
+}
+
+function initialStore() {
   return {
-    users: DEMO_USERS.map(u => ({ ...u })),
+    users: [{ ...DEFAULT_ADMIN }],
     assignments: {},
     courseParts: {},
-    bookings: [],
-    invitations: []
+    bookings: []
   };
 }
 
 function normalizeStore(parsed = {}) {
-  const fresh = initialDemoStore();
-  const usersById = new Map(fresh.users.map(u => [u.id, u]));
-  (parsed.users || []).forEach(u => usersById.set(u.id, { ...u }));
+  const base = initialStore();
+  const map = new Map(base.users.map(u => [u.id, u]));
+  (parsed.users || []).forEach(u => map.set(u.id, { ...u }));
   return {
-    users: [...usersById.values()],
+    users: [...map.values()],
     assignments: parsed.assignments || {},
     courseParts: parsed.courseParts || {},
-    bookings: parsed.bookings || [],
-    invitations: parsed.invitations || []
+    bookings: parsed.bookings || []
   };
 }
 
-function getDemoStore() {
-  const raw = localStorage.getItem(LS_KEY);
+function getLocalStore() {
+  const raw = localStorage.getItem(LOCAL_KEY);
   if (!raw) {
-    const fresh = initialDemoStore();
-    localStorage.setItem(LS_KEY, JSON.stringify(fresh));
+    const fresh = initialStore();
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(fresh));
     return fresh;
   }
   try {
     return normalizeStore(JSON.parse(raw));
   } catch {
-    const fresh = initialDemoStore();
-    localStorage.setItem(LS_KEY, JSON.stringify(fresh));
+    const fresh = initialStore();
+    localStorage.setItem(LOCAL_KEY, JSON.stringify(fresh));
     return fresh;
   }
 }
 
-function setDemoStore(next) {
-  localStorage.setItem(LS_KEY, JSON.stringify(next));
+function setLocalStore(next) {
+  localStorage.setItem(LOCAL_KEY, JSON.stringify(next));
 }
 
 async function initFirebaseIfConfigured() {
-  if (PLACEHOLDER) return;
-  try {
-    const [appMod, authMod, fsMod, fnMod] = await Promise.all([
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js"),
-      import("https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js")
-    ]);
-    const app = appMod.initializeApp(firebaseConfig);
-    fb = {
-      app,
-      auth: authMod.getAuth(app),
-      db: fsMod.getFirestore(app),
-      functions: fnMod.getFunctions(app, functionRegion || "europe-west1"),
-      signInWithEmailAndPassword: authMod.signInWithEmailAndPassword,
-      signOut: authMod.signOut,
-      collection: fsMod.collection,
-      doc: fsMod.doc,
-      getDoc: fsMod.getDoc,
-      getDocs: fsMod.getDocs,
-      setDoc: fsMod.setDoc,
-      deleteDoc: fsMod.deleteDoc,
-      writeBatch: fsMod.writeBatch,
-      runTransaction: fsMod.runTransaction,
-      serverTimestamp: fsMod.serverTimestamp,
-      httpsCallable: fnMod.httpsCallable
-    };
-  } catch (err) {
-    console.warn("Firebase başlatılamadı; demo moda geçildi.", err);
-    state.mode = "demo";
-  }
+  if (!CONFIGURED) return;
+  const [appMod, authMod, fsMod, fnMod] = await Promise.all([
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js"),
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js"),
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js"),
+    import("https://www.gstatic.com/firebasejs/10.12.5/firebase-functions.js")
+  ]);
+  const app = appMod.initializeApp(firebaseConfig);
+  fb = {
+    app,
+    auth: authMod.getAuth(app),
+    db: fsMod.getFirestore(app),
+    functions: fnMod.getFunctions(app, functionRegion || "europe-west1"),
+    signInWithEmailAndPassword: authMod.signInWithEmailAndPassword,
+    signOut: authMod.signOut,
+    collection: fsMod.collection,
+    doc: fsMod.doc,
+    getDoc: fsMod.getDoc,
+    getDocs: fsMod.getDocs,
+    setDoc: fsMod.setDoc,
+    deleteDoc: fsMod.deleteDoc,
+    writeBatch: fsMod.writeBatch,
+    runTransaction: fsMod.runTransaction,
+    serverTimestamp: fsMod.serverTimestamp,
+    httpsCallable: fnMod.httpsCallable
+  };
 }
 
 function toast(message, type = "info") {
   const el = $("toast");
+  if (!el) return;
   el.textContent = message;
   el.className = `toast show ${type}`;
-  setTimeout(() => { el.className = "toast"; }, 4400);
+  setTimeout(() => { el.className = "toast"; }, 4200);
 }
 
 function isAdmin() {
   return state.user?.role === "admin";
-}
-
-function isTeacher() {
-  return state.user?.role === "teacher";
 }
 
 function getCourse(courseId) {
@@ -137,8 +158,9 @@ function getRoom(roomId) {
 
 function teacherName(id) {
   if (!id) return "Atanmamış";
-  const u = state.users.find(u => u.id === id);
-  return u ? `${u.title ? `${u.title} ` : ""}${u.displayName}` : id;
+  const u = state.users.find(user => user.id === id);
+  if (!u) return id;
+  return `${u.title ? `${u.title} ` : ""}${u.displayName || u.username || u.email}`.trim();
 }
 
 function visibleTeachers() {
@@ -163,7 +185,7 @@ function bookingId(courseId, partIndex = 0) {
 }
 
 function blockSlots(startSlot, duration) {
-  return Array.from({ length: duration }, (_, i) => Number(startSlot) + i);
+  return Array.from({ length: Number(duration) }, (_, i) => Number(startSlot) + i);
 }
 
 function rangesOverlap(aStart, aDuration, bStart, bDuration) {
@@ -177,32 +199,26 @@ function bookingForCoursePart(courseId, partIndex) {
 }
 
 function bookingAt(roomId, day, slot) {
-  return state.bookings.find(b => b.roomId === roomId && b.day === day && b.startSlot === Number(slot));
+  return state.bookings.find(b => b.roomId === roomId && b.day === day && Number(b.startSlot) === Number(slot));
 }
 
 function bookingCovering(roomId, day, slot) {
-  return state.bookings.find(b => b.roomId === roomId && b.day === day && Number(slot) >= Number(b.startSlot) && Number(slot) < Number(b.startSlot) + Number(b.duration));
+  return state.bookings.find(b => b.roomId === roomId && b.day === day && Number(slot) > Number(b.startSlot) && Number(slot) < Number(b.startSlot) + Number(b.duration));
 }
 
-function canDeleteBooking(b) {
-  return isAdmin() || b.teacherId === state.user?.id || b.createdBy === state.user?.id;
+function canDeleteBooking(booking) {
+  return isAdmin() || booking.teacherId === state.user?.id || booking.createdBy === state.user?.id;
 }
 
 function validateTimeBlock(course, roomId, day, startSlot, duration) {
-  if (!course) return "Ders bulunamadı.";
-  if (!DAYS.includes(day)) return "Geçersiz gün seçimi.";
-  if (!ROOMS.some(r => r.id === roomId)) return "Geçersiz derslik seçimi.";
-  if (course.year === 1 && roomId !== "109") {
-    return "1. sınıf dersleri yalnızca 109 no'lu dersliğe yerleştirilebilir.";
-  }
-  if (Number(startSlot) < 0 || Number(startSlot) + Number(duration) > SLOTS.length) {
-    return "Seçilen başlangıç saati ders süresi için uygun değil.";
-  }
-  const period = SLOTS[Number(startSlot)].period;
-  const crossesLunch = blockSlots(startSlot, duration).some(slot => !SLOTS[slot] || SLOTS[slot].period !== period);
-  if (crossesLunch) {
-    return "Ders bloğu öğle arasını geçemez; aynı ders sabah ve öğleden sonra arasında parçalanamaz.";
-  }
+  if (!course) return "Ders bilgisi bulunamadı.";
+  if (!DAYS.includes(day)) return "Gün seçimi geçersiz.";
+  if (!ROOMS.some(r => r.id === roomId)) return "Derslik seçimi geçersiz.";
+  if (course.year === 1 && roomId !== "109") return "1. sınıf dersleri 109 no'lu derslikte yürütülmelidir.";
+  if (Number(startSlot) < 0 || Number(startSlot) + Number(duration) > SLOTS.length) return "Seçilen saat aralığı ders süresi için uygun değildir.";
+  const period = SLOTS[Number(startSlot)]?.period;
+  const crossesBreak = blockSlots(startSlot, duration).some(slot => !SLOTS[slot] || SLOTS[slot].period !== period);
+  if (crossesBreak) return "Ders bloğu öğle arasını geçemez. Gerekirse ders yalnızca yetkili kullanıcı tarafından parçalanmalıdır.";
   return null;
 }
 
@@ -211,86 +227,79 @@ function validateAgainstBookings(placement, proposed = []) {
   const basicError = validateTimeBlock(course, roomId, day, startSlot, duration);
   if (basicError) return basicError;
 
-  const thisBookingId = bookingId(course.id, partIndex);
+  const currentId = bookingId(course.id, partIndex);
   const groupKey = course.electiveGroup || null;
 
   for (const b of state.bookings) {
     const existingCourse = getCourse(b.courseId);
     if (!existingCourse) continue;
-    if (b.id === thisBookingId) return `${course.code} için bu parça zaten programa yerleştirilmiş.`;
+    if (b.id === currentId) return `${course.code} için ilgili ders bloğu daha önce programa yerleştirilmiş.`;
     if (b.day !== day) continue;
     if (!rangesOverlap(startSlot, duration, b.startSlot, b.duration)) continue;
 
-    if (b.roomId === roomId) {
-      return `${SLOTS[startSlot].label} bloğu ${getRoom(roomId)?.name} için dolu.`;
-    }
-    if (b.teacherId === teacherId) {
-      return `${teacherName(teacherId)} aynı zaman aralığında başka bir derse atanmış.`;
-    }
+    if (b.roomId === roomId) return `${getRoom(roomId)?.name || roomId} bu zaman aralığında doludur.`;
+    if (b.teacherId === teacherId) return `${teacherName(teacherId)} aynı zaman aralığında başka bir derse atanmıştır.`;
+
     const sameSemester = existingCourse.semester === course.semester;
     const sameElectivePool = groupKey && existingCourse.electiveGroup === groupKey;
-    if (sameSemester && !sameElectivePool) {
-      return `${course.semester}. yarıyıl için aynı zaman aralığında başka bir ders var.`;
-    }
+    if (sameSemester && !sameElectivePool) return `${course.semester}. yarıyıl için bu zaman aralığında başka bir ders bulunmaktadır.`;
   }
 
   for (const p of proposed) {
     if (p.day !== day) continue;
     if (!rangesOverlap(startSlot, duration, p.startSlot, p.duration)) continue;
     if (p.roomId === roomId) return "Aynı işlem içinde iki ders aynı dersliğe yerleştirilemez.";
-    if (p.teacherId === teacherId) return "Aynı hoca aynı zaman aralığında iki farklı derse atanamaz.";
+    if (p.teacherId === teacherId) return "Aynı öğretim üyesi aynı zaman aralığında iki farklı derse atanamaz.";
     const sameSemester = p.course.semester === course.semester;
     const sameElectivePool = groupKey && p.course.electiveGroup === groupKey;
-    if (sameSemester && !sameElectivePool) return "Aynı yarıyıl dersleri çakışıyor.";
+    if (sameSemester && !sameElectivePool) return "Aynı yarıyıldaki dersler çakışmaktadır.";
   }
   return null;
 }
 
 function buildPlacements(courseId, partIndex, day, startSlot, roomId) {
   const course = getCourse(courseId);
-  const duration = partsFor(courseId)[partIndex];
+  const duration = partsFor(courseId)[Number(partIndex)];
   const teacherId = state.assignments[courseId];
   if (!course) throw new Error("Ders bulunamadı.");
-  if (!teacherId) throw new Error(`${course.code} için önce hoca ataması yapılmalı.`);
+  if (!teacherId) throw new Error(`${course.code} için önce öğretim üyesi ataması yapılmalıdır.`);
 
   const groupCourses = course.electiveGroup
     ? COURSES.filter(c => c.semester === course.semester && c.electiveGroup === course.electiveGroup)
     : [course];
 
   if (course.electiveGroup) {
-    if (groupCourses.length > ROOMS.length) {
-      throw new Error(`${course.electiveGroup} için yeterli derslik yok. ${groupCourses.length} ders, ${ROOMS.length} derslik mevcut.`);
-    }
+    if (groupCourses.length > ROOMS.length) throw new Error(`${course.electiveGroup} için yeterli derslik bulunmamaktadır.`);
     for (const gc of groupCourses) {
-      if (!state.assignments[gc.id]) throw new Error(`${course.electiveGroup} içindeki ${gc.code} için hoca ataması yapılmamış.`);
-      const gp = partsFor(gc.id)[partIndex] || partsFor(gc.id)[0];
-      if (gp !== duration) throw new Error(`${course.electiveGroup} içindeki derslerin süreleri eşit değil; otomatik eşzamanlı atama yapılamaz.`);
+      if (!state.assignments[gc.id]) throw new Error(`${course.electiveGroup} içindeki ${gc.code} için öğretim üyesi ataması yapılmamıştır.`);
+      const groupPart = partsFor(gc.id)[Number(partIndex)] || partsFor(gc.id)[0];
+      if (groupPart !== duration) throw new Error(`${course.electiveGroup} içindeki derslerin süreleri eşit olmalıdır.`);
     }
   }
 
   const orderedRooms = [roomId, ...ROOMS.map(r => r.id).filter(id => id !== roomId)];
-  const orderedCourses = [course, ...groupCourses.filter(gc => gc.id !== courseId)];
+  const orderedCourses = [course, ...groupCourses.filter(c => c.id !== course.id)];
 
-  return orderedCourses.map((gc, idx) => ({
-    id: bookingId(gc.id, partIndex),
+  return orderedCourses.map((gc, index) => ({
+    id: bookingId(gc.id, Number(partIndex)),
     course: gc,
     courseId: gc.id,
     teacherId: state.assignments[gc.id],
-    roomId: orderedRooms[idx],
+    roomId: orderedRooms[index],
     day,
     startSlot: Number(startSlot),
-    duration,
+    duration: Number(duration),
     partIndex: Number(partIndex),
     electiveGroup: gc.electiveGroup || null
   }));
 }
 
 function validatePlacements(placements) {
-  const checked = [];
-  for (const p of placements) {
-    const err = validateAgainstBookings(p, checked);
+  const proposed = [];
+  for (const placement of placements) {
+    const err = validateAgainstBookings(placement, proposed);
     if (err) throw new Error(err);
-    checked.push(p);
+    proposed.push(placement);
   }
 }
 
@@ -323,10 +332,9 @@ function placementToBooking(p, extra = {}) {
 }
 
 async function saveBookingLocal(placements) {
-  const store = getDemoStore();
-  const newBookings = placements.map(p => placementToBooking(p));
-  store.bookings = [...store.bookings, ...newBookings];
-  setDemoStore(store);
+  const store = getLocalStore();
+  store.bookings = [...store.bookings, ...placements.map(p => placementToBooking(p))];
+  setLocalStore(store);
   await loadData();
 }
 
@@ -336,29 +344,27 @@ async function saveBookingFirebase(placements) {
     const bookingRefs = placements.map(p => doc(db, "bookings", p.id));
     for (const ref of bookingRefs) {
       const snap = await tx.get(ref);
-      if (snap.exists()) throw new Error("Bu ders/parça daha önce programa yerleştirilmiş.");
+      if (snap.exists()) throw new Error("Bu ders bloğu daha önce programa yerleştirilmiştir.");
     }
 
-    const occMap = new Map();
+    const occupancy = new Map();
     for (const p of placements) {
       for (const item of occupancyKeysForPlacement(p)) {
-        if (!occMap.has(item.key)) occMap.set(item.key, item);
+        if (!occupancy.has(item.key)) occupancy.set(item.key, item);
       }
     }
 
-    for (const item of occMap.values()) {
+    for (const item of occupancy.values()) {
       const ref = doc(db, "occupancy", item.key);
       const snap = await tx.get(ref);
       if (!snap.exists()) continue;
       const data = snap.data();
       const sameElectiveCohort = item.kind === "cohort" && item.electiveGroup && data.electiveGroup === item.electiveGroup;
-      if (!sameElectiveCohort) throw new Error("Bu zaman aralığı başka bir kullanıcı tarafından az önce dolduruldu.");
+      if (!sameElectiveCohort) throw new Error("Seçilen zaman aralığı başka bir kullanıcı tarafından doldurulmuştur.");
     }
 
-    for (const p of placements) {
-      tx.set(doc(db, "bookings", p.id), placementToBooking(p, { createdAt: serverTimestamp() }));
-    }
-    for (const item of occMap.values()) {
+    for (const p of placements) tx.set(doc(db, "bookings", p.id), placementToBooking(p, { createdAt: serverTimestamp() }));
+    for (const item of occupancy.values()) {
       tx.set(doc(db, "occupancy", item.key), {
         kind: item.kind,
         electiveGroup: item.electiveGroup || null,
@@ -370,7 +376,7 @@ async function saveBookingFirebase(placements) {
 }
 
 async function bookCourse(courseId, partIndex, day, startSlot, roomId) {
-  const placements = buildPlacements(courseId, Number(partIndex), day, Number(startSlot), roomId);
+  const placements = buildPlacements(courseId, partIndex, day, startSlot, roomId);
   validatePlacements(placements);
   if (state.mode === "firebase" && fb) await saveBookingFirebase(placements);
   else await saveBookingLocal(placements);
@@ -381,7 +387,7 @@ async function bookCourse(courseId, partIndex, day, startSlot, roomId) {
 async function deleteBooking(courseId, partIndex = 0) {
   const course = getCourse(courseId);
   const existing = bookingForCoursePart(courseId, partIndex);
-  if (existing && !canDeleteBooking(existing)) throw new Error("Bu dersi programdan kaldırma yetkiniz yok.");
+  if (existing && !canDeleteBooking(existing)) throw new Error("Bu dersi programdan kaldırma yetkiniz bulunmamaktadır.");
 
   const idsToDelete = course.electiveGroup
     ? COURSES.filter(c => c.semester === course.semester && c.electiveGroup === course.electiveGroup).map(c => bookingId(c.id, partIndex))
@@ -391,8 +397,8 @@ async function deleteBooking(courseId, partIndex = 0) {
     const { db, doc, getDoc, writeBatch } = fb;
     const batch = writeBatch(db);
     const occKeys = new Set();
-    for (const bid of idsToDelete) {
-      const ref = doc(db, "bookings", bid);
+    for (const id of idsToDelete) {
+      const ref = doc(db, "bookings", id);
       const snap = await getDoc(ref);
       if (snap.exists()) {
         const b = snap.data();
@@ -403,157 +409,141 @@ async function deleteBooking(courseId, partIndex = 0) {
     occKeys.forEach(k => batch.delete(doc(db, "occupancy", k)));
     await batch.commit();
   } else {
-    const store = getDemoStore();
+    const store = getLocalStore();
     store.bookings = store.bookings.filter(b => !idsToDelete.includes(b.id));
-    setDemoStore(store);
+    setLocalStore(store);
   }
+
   await loadData();
-  toast(course.electiveGroup ? "Seçmeli havuz eşzamanlı programdan kaldırıldı." : "Ders programdan kaldırıldı.", "success");
+  toast(course.electiveGroup ? "Seçmeli ders havuzu programdan kaldırıldı." : "Ders programdan kaldırıldı.", "success");
 }
 
 async function setAssignment(courseId, teacherId) {
-  if (!isAdmin()) throw new Error("Bu işlem için yetkili kullanıcı gerekir.");
+  if (!isAdmin()) throw new Error("Bu işlem yetkili kullanıcı tarafından yapılabilir.");
   if (state.mode === "firebase" && fb) {
     const { db, doc, setDoc, deleteDoc, serverTimestamp } = fb;
-    if (teacherId) {
-      await setDoc(doc(db, "assignments", courseId), { courseId, teacherId, updatedBy: state.user.id, updatedAt: serverTimestamp() });
-    } else {
-      await deleteDoc(doc(db, "assignments", courseId));
-    }
+    if (teacherId) await setDoc(doc(db, "assignments", courseId), { courseId, teacherId, updatedBy: state.user.id, updatedAt: serverTimestamp() });
+    else await deleteDoc(doc(db, "assignments", courseId));
   } else {
-    const store = getDemoStore();
+    const store = getLocalStore();
     if (teacherId) store.assignments[courseId] = teacherId;
     else delete store.assignments[courseId];
-    setDemoStore(store);
+    setLocalStore(store);
   }
   await loadData();
-  toast("Atama güncellendi.", "success");
+  toast("Ders-öğretim üyesi ataması güncellendi.", "success");
 }
 
-async function setCourseParts(courseId, partText) {
-  if (!isAdmin()) throw new Error("Bu işlem için yetkili kullanıcı gerekir.");
+async function setCourseParts(courseId, raw) {
+  if (!isAdmin()) throw new Error("Ders parçalama işlemi yalnızca yetkili kullanıcı tarafından yapılabilir.");
   const course = getCourse(courseId);
-  const parts = partText.split(",").map(x => Number(x.trim())).filter(n => Number.isFinite(n) && n > 0);
-  if (!parts.length) throw new Error("Parça bilgisi boş olamaz. Örn: 4 veya 2,2");
-  const total = parts.reduce((a, b) => a + b, 0);
-  if (total !== course.duration) throw new Error(`Parça toplamı ders süresine eşit olmalı. ${course.code} toplam süre: ${course.duration}`);
+  const parts = String(raw || "").split(",").map(x => Number(x.trim())).filter(n => Number.isFinite(n) && n > 0);
+  if (!parts.length) throw new Error("Parça bilgisi boş bırakılamaz. Örnek: 4 veya 2,2");
+  const total = parts.reduce((sum, n) => sum + n, 0);
+  if (total !== course.duration) throw new Error(`Parça toplamı ders süresine eşit olmalıdır. ${course.code}: ${course.duration} ders saati.`);
 
   if (state.mode === "firebase" && fb) {
     const { db, doc, setDoc, serverTimestamp } = fb;
     await setDoc(doc(db, "courseParts", courseId), { courseId, parts, updatedBy: state.user.id, updatedAt: serverTimestamp() });
   } else {
-    const store = getDemoStore();
+    const store = getLocalStore();
     store.courseParts[courseId] = parts;
-    setDemoStore(store);
+    setLocalStore(store);
   }
   await loadData();
-  toast("Ders parça kuralı güncellendi.", "success");
+  toast("Ders blok yapısı güncellendi.", "success");
 }
 
-function selectedInviteCourses() {
-  return [...document.querySelectorAll("[data-invite-course]:checked")].map(el => el.value);
+function selectedAdminCourseIds() {
+  return [...document.querySelectorAll("[data-new-user-course]:checked")].map(el => el.value);
 }
 
-async function inviteTeacher(form) {
-  if (!isAdmin()) throw new Error("Bu işlem için yetkili kullanıcı gerekir.");
+async function createInstructor(form) {
+  if (!isAdmin()) throw new Error("Bu işlem yetkili kullanıcı tarafından yapılabilir.");
   const displayName = form.displayName.value.trim();
   const title = form.title.value.trim();
-  const email = form.email.value.trim().toLowerCase();
-  const username = form.username.value.trim() || email;
-  const password = form.demoPassword?.value || "123456";
-  const courseIds = selectedInviteCourses();
+  const username = slugUsername(form.username.value);
+  const password = form.password.value;
+  const courseIds = selectedAdminCourseIds();
 
-  if (!displayName || !email) throw new Error("Ad soyad ve e-posta zorunludur.");
+  if (!displayName) throw new Error("Ad soyad alanı zorunludur.");
+  if (!username || username.length < 3) throw new Error("Kullanıcı adı en az üç karakter olmalıdır.");
+  if (!password || password.length < 6) throw new Error("Şifre en az altı karakter olmalıdır.");
 
   if (state.mode === "firebase" && fb) {
-    const callInvite = fb.httpsCallable(fb.functions, "inviteTeacher");
-    const result = await callInvite({ displayName, title, email, courseIds });
-    await loadData();
-    const data = result.data || {};
-    renderInviteResult(data.emailSent
-      ? `Davet e-postası gönderildi: ${email}`
-      : `Davet kaydı oluşturuldu ancak e-posta gönderilmedi. Davet linki: ${data.inviteLink || "Fonksiyon yanıtında link yok."}`);
-    toast(data.emailSent ? "Davet e-postası gönderildi." : "Davet oluşturuldu; mail ayarı yoksa linki manuel paylaşın.", data.emailSent ? "success" : "info");
-    return;
+    const call = fb.httpsCallable(fb.functions, "createInstructor");
+    await call({ displayName, title, username, password, courseIds });
+  } else {
+    const store = getLocalStore();
+    const id = username;
+    const email = usernameToEmail(username);
+    const user = { id, username, email, password, displayName, title, role: "teacher" };
+    const index = store.users.findIndex(u => u.id === id || u.username === username || u.email === email);
+    if (index >= 0) store.users[index] = { ...store.users[index], ...user };
+    else store.users.push(user);
+    courseIds.forEach(courseId => { store.assignments[courseId] = id; });
+    setLocalStore(store);
   }
-
-  const store = getDemoStore();
-  const id = username.replace(/[^a-zA-Z0-9_@.-]/g, "_").toLowerCase();
-  const existingIndex = store.users.findIndex(u => u.id === id || u.email === email);
-  const teacher = { id, username, email, password, displayName, title, role: "teacher" };
-  if (existingIndex >= 0) store.users[existingIndex] = { ...store.users[existingIndex], ...teacher };
-  else store.users.push(teacher);
-  for (const courseId of courseIds) store.assignments[courseId] = id;
-  store.invitations.push({ email, displayName, courseIds, createdAt: new Date().toISOString(), status: "demo" });
-  setDemoStore(store);
   await loadData();
-  renderInviteResult(`Demo mod: Gerçek e-posta gönderilmedi. Kullanıcı girişi: ${username} / ${password}`);
-  toast("Demo kullanıcı eklendi ve dersleri atandı.", "success");
-}
-
-function renderInviteResult(message) {
-  const target = $("inviteResult");
-  if (!target) return;
-  target.classList.remove("hidden");
-  target.textContent = message;
+  toast("Öğretim üyesi kaydı ve ders atamaları tamamlandı.", "success");
 }
 
 async function loadData() {
   if (state.mode === "firebase" && fb && state.user) {
     const { db, collection, getDocs } = fb;
-    const jobs = [
+    const [userSnap, assignSnap, partsSnap, bookingSnap] = await Promise.all([
       getDocs(collection(db, "users")),
       getDocs(collection(db, "assignments")),
       getDocs(collection(db, "courseParts")),
       getDocs(collection(db, "bookings"))
-    ];
-    if (isAdmin()) jobs.push(getDocs(collection(db, "invitations")));
-    const [userSnap, assignSnap, partsSnap, bookingSnap, inviteSnap] = await Promise.all(jobs);
+    ]);
     state.users = userSnap.docs.map(d => ({ id: d.id, ...d.data() }));
     state.assignments = Object.fromEntries(assignSnap.docs.map(d => [d.id, d.data().teacherId]));
     state.courseParts = Object.fromEntries(partsSnap.docs.map(d => [d.id, d.data().parts]));
     state.bookings = bookingSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    state.invitations = inviteSnap ? inviteSnap.docs.map(d => ({ id: d.id, ...d.data() })) : [];
   } else {
-    const store = getDemoStore();
+    const store = getLocalStore();
     state.users = store.users.map(({ password, ...u }) => u);
     state.assignments = store.assignments;
     state.courseParts = store.courseParts;
     state.bookings = store.bookings;
-    state.invitations = store.invitations || [];
   }
   render();
 }
 
-async function loginDemo(identifier, password) {
-  const store = getDemoStore();
-  const found = store.users.find(u => (u.username === identifier || u.email === identifier || u.id === identifier) && u.password === password);
-  if (!found) throw new Error("Demo kullanıcı adı/şifre hatalı.");
+async function loginLocal(identifier, password) {
+  const store = getLocalStore();
+  const clean = String(identifier || "").trim().toLowerCase();
+  const found = store.users.find(u =>
+    (String(u.username || "").toLowerCase() === clean || String(u.email || "").toLowerCase() === clean || String(u.id || "").toLowerCase() === clean) &&
+    u.password === password
+  );
+  if (!found) throw new Error("Kullanıcı adı veya şifre hatalı.");
   const { password: _pw, ...safe } = found;
   state.user = safe;
-  state.mode = "demo";
   await loadData();
 }
 
-async function loginFirebase(email, password) {
-  if (!fb) throw new Error("Firebase başlatılamadı.");
+async function loginFirebase(identifier, password) {
+  if (!fb) throw new Error("Firebase bağlantısı başlatılamadı.");
+  const email = usernameToEmail(identifier);
   const cred = await fb.signInWithEmailAndPassword(fb.auth, email, password);
   const uid = cred.user.uid;
   const userRef = fb.doc(fb.db, "users", uid);
   let snap = await fb.getDoc(userRef);
 
-  if (!snap.exists() && adminEmails.includes(email)) {
-    try {
-      await fb.setDoc(userRef, { email, displayName: "Yetkili Kullanıcı", role: "admin", title: "Bölüm Başkanı" });
-      snap = await fb.getDoc(userRef);
-    } catch (err) {
-      console.warn("Admin kullanıcı dokümanı otomatik oluşturulamadı.", err);
-    }
+  if (!snap.exists() && adminEmails.map(x => x.toLowerCase()).includes(email.toLowerCase())) {
+    await fb.setDoc(userRef, {
+      email,
+      username: emailToUsername(email),
+      displayName: "Yetkili Kullanıcı",
+      title: "Bölüm Başkanı",
+      role: "admin"
+    });
+    snap = await fb.getDoc(userRef);
   }
 
-  if (!snap.exists()) {
-    throw new Error("Giriş başarılı ancak users koleksiyonunda yetki kaydı yok. Adminin bu kullanıcıyı Firestore users koleksiyonuna eklemesi gerekir.");
-  }
+  if (!snap.exists()) throw new Error("Kullanıcı yetki kaydı bulunamadı. Lütfen yetkili kullanıcıya başvurunuz.");
   state.user = { id: uid, email, ...snap.data() };
   await loadData();
 }
@@ -565,26 +555,145 @@ async function logout() {
   render();
 }
 
+function semesterOptions(selected = state.selectedSemester) {
+  return Array.from({ length: 8 }, (_, i) => {
+    const semester = i + 1;
+    return `<option value="${semester}" ${Number(selected) === semester ? "selected" : ""}>${semester}. yarıyıl / ${Math.ceil(semester / 2)}. sınıf</option>`;
+  }).join("");
+}
+
 function renderLogin() {
   $("loginPanel").classList.remove("hidden");
   $("appPanel").classList.add("hidden");
-  $("modeBadge").textContent = state.mode === "firebase" ? "Firebase" : "Demo";
-  $("demoInfo").classList.toggle("hidden", state.mode === "firebase");
+  $("setupNotice").classList.toggle("hidden", state.mode !== "local");
 }
 
 function render() {
   if (!state.user) return renderLogin();
   $("loginPanel").classList.add("hidden");
   $("appPanel").classList.remove("hidden");
-  $("modeBadge").textContent = state.mode === "firebase" ? "Firebase" : "Demo";
-  $("userBadge").textContent = `${state.user.displayName || state.user.email} · ${state.user.role === "admin" ? "Yetkili" : "Hoca"}`;
-  $("backendBadge").textContent = state.mode === "firebase" ? "Firebase veri tabanı" : "Tarayıcı içi demo";
-  renderActiveBadge();
+  $("userBadge").textContent = `${teacherName(state.user.id)} · ${state.user.role === "admin" ? "Yetkili kullanıcı" : "Öğretim üyesi"}`;
+  $("systemBadge").textContent = state.mode === "firebase" ? "Ortak veri tabanı" : "Yerel kurulum denetimi";
   renderFilters();
   renderStats();
   renderAdmin();
+  renderActiveBadge();
   renderMyCourses();
   renderSchedule();
+}
+
+function renderFilters() {
+  const sem = $("semesterFilter");
+  sem.innerHTML = semesterOptions(state.selectedSemester);
+  sem.value = String(state.selectedSemester);
+  const room = $("roomFilter");
+  room.innerHTML = `<option value="ALL">Tüm derslikler</option>` + ROOMS.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
+  room.value = state.selectedRoom;
+}
+
+function renderStats() {
+  const courses = COURSES.filter(c => c.semester === state.selectedSemester);
+  const assigned = courses.filter(c => state.assignments[c.id]).length;
+  const placed = courses.filter(c => partsFor(c.id).every((_, idx) => bookingForCoursePart(c.id, idx))).length;
+  const teachers = visibleTeachers().filter(u => u.role === "teacher").length;
+  const electiveGroups = new Set(courses.filter(c => c.electiveGroup).map(c => c.electiveGroup)).size;
+  $("statsGrid").innerHTML = [
+    ["Seçili yarıyıl dersi", courses.length],
+    ["Ataması yapılan ders", assigned],
+    ["Programa yerleşen ders", placed],
+    ["Tanımlı öğretim üyesi", teachers],
+    ["Seçmeli ders havuzu", electiveGroups]
+  ].map(([label, value]) => `<article class="statCard"><span>${label}</span><strong>${value}</strong></article>`).join("");
+}
+
+function teacherOptions(selected = "") {
+  return `<option value="">Atanmamış</option>` + visibleTeachers()
+    .map(u => `<option value="${escapeHtml(u.id)}" ${selected === u.id ? "selected" : ""}>${escapeHtml(teacherName(u.id))}</option>`)
+    .join("");
+}
+
+function renderAdmin() {
+  const panel = $("adminPanel");
+  if (!isAdmin()) {
+    panel.classList.add("hidden");
+    panel.innerHTML = "";
+    return;
+  }
+  panel.classList.remove("hidden");
+
+  const semesterCourses = COURSES.filter(c => c.semester === state.selectedSemester).sort((a, b) => a.code.localeCompare(b.code, "tr"));
+  const teacherRows = visibleTeachers().map(u => {
+    const assignedCodes = COURSES.filter(c => state.assignments[c.id] === u.id).map(c => c.code);
+    return `<div class="teacherRow">
+      <div>
+        <strong>${escapeHtml(teacherName(u.id))}</strong>
+        <span>${escapeHtml(u.username || emailToUsername(u.email) || u.id)}</span>
+      </div>
+      <div class="teacherCourseCodes">${assignedCodes.length ? assignedCodes.map(code => `<em>${code}</em>`).join("") : `<small>Atama yok</small>`}</div>
+    </div>`;
+  }).join("");
+
+  const assignRows = semesterCourses.map(c => {
+    const partsValue = partsFor(c.id).join(",");
+    return `<tr>
+      <td><strong>${escapeHtml(c.code)}</strong><span>${escapeHtml(c.name)}</span></td>
+      <td>T:${c.t} U:${c.u} UK:${c.uk} AKTS:${c.ects}</td>
+      <td>${c.electiveGroup ? `<b class="poolTag">${escapeHtml(c.electiveGroup)}</b>` : "Zorunlu"}</td>
+      <td><select data-assignment-course="${c.id}">${teacherOptions(state.assignments[c.id] || "")}</select></td>
+      <td class="partCell"><input data-part-input="${c.id}" value="${escapeHtml(partsValue)}" title="Örn. 4 veya 2,2"><button type="button" class="mini" data-action="save-parts" data-course-id="${c.id}">Kaydet</button></td>
+    </tr>`;
+  }).join("");
+
+  const courseChecks = semesterCourses.map(c => `<label class="checkLine">
+    <input type="checkbox" value="${c.id}" data-new-user-course>
+    <span><strong>${c.code}</strong> ${escapeHtml(c.name)} <small>${c.electiveGroup ? escapeHtml(c.electiveGroup) : "Zorunlu"}</small></span>
+  </label>`).join("");
+
+  panel.innerHTML = `
+    <section class="card adminCard">
+      <div class="sectionHead compactHead">
+        <div>
+          <p class="eyebrow">Yetkili kullanıcı işlemleri</p>
+          <h2>Yönetici paneli</h2>
+        </div>
+      </div>
+
+      <div class="adminGrid">
+        <form id="createInstructorForm" class="adminBox stackForm">
+          <h3>Öğretim üyesi tanımlama</h3>
+          <div class="formGrid">
+            <label>Unvan<input name="title" placeholder="Dr. Öğr. Üyesi"></label>
+            <label>Ad soyad<input name="displayName" required placeholder="Ad Soyad"></label>
+            <label>Kullanıcı adı<input name="username" required placeholder="ornek.kullanici"></label>
+            <label>Şifre<input name="password" type="password" required minlength="6" placeholder="En az 6 karakter"></label>
+          </div>
+          <label>İlk ders atamaları · seçili yarıyıl</label>
+          <div class="checkGrid">${courseChecks}</div>
+          <button class="primary" type="submit">Öğretim üyesini kaydet</button>
+        </form>
+
+        <div class="adminBox">
+          <h3>Öğretim üyeleri</h3>
+          <div class="teacherList">${teacherRows || `<div class="empty">Tanımlı öğretim üyesi bulunmamaktadır.</div>`}</div>
+        </div>
+      </div>
+
+      <div class="assignmentPanel">
+        <div class="assignmentTop">
+          <div>
+            <h3>Ders-öğretim üyesi atamaları</h3>
+            <p class="muted">Yarıyıl seçildiğinde ilgili dersler, kredi bilgileri ve öğretim üyesi atama alanları listelenir.</p>
+          </div>
+          <label>Yarıyıl<select id="adminSemesterSelect">${semesterOptions(state.selectedSemester)}</select></label>
+        </div>
+        <div class="assignmentTableWrap">
+          <table class="assignmentTable">
+            <thead><tr><th>Ders</th><th>Kredi</th><th>Tür</th><th>Öğretim üyesi</th><th>Blok</th></tr></thead>
+            <tbody>${assignRows}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>`;
 }
 
 function renderActiveBadge() {
@@ -597,218 +706,59 @@ function renderActiveBadge() {
   const course = getCourse(state.activePlacement.courseId);
   const duration = partsFor(course.id)[state.activePlacement.partIndex];
   el.classList.remove("hidden");
-  el.textContent = `Seçili: ${course.code} · ${duration} saat`;
-}
-
-function renderStats() {
-  const coursesInSem = COURSES.filter(c => c.semester === state.selectedSemester);
-  const assigned = coursesInSem.filter(c => state.assignments[c.id]).length;
-  const placed = coursesInSem.filter(c => partsFor(c.id).every((_, idx) => bookingForCoursePart(c.id, idx))).length;
-  const teacherCount = visibleTeachers().filter(u => u.role === "teacher").length;
-  const electiveGroups = new Set(coursesInSem.filter(c => c.electiveGroup).map(c => c.electiveGroup)).size;
-  $("statsGrid").innerHTML = [
-    ["Seçili yarıyıl dersleri", coursesInSem.length],
-    ["Hoca ataması yapılan", assigned],
-    ["Programa yerleşen", placed],
-    ["Sistemdeki hoca", teacherCount || 0],
-    ["Seçmeli havuz", electiveGroups]
-  ].map(([label, value]) => `<div class="statCard"><div class="statLabel">${label}</div><div class="statValue">${value}</div></div>`).join("");
-}
-
-function renderFilters() {
-  const sem = $("semesterFilter");
-  sem.innerHTML = Array.from({ length: 8 }, (_, i) => `<option value="${i + 1}">${i + 1}. yarıyıl / ${Math.ceil((i + 1) / 2)}. sınıf</option>`).join("");
-  sem.value = String(state.selectedSemester);
-
-  const room = $("roomFilter");
-  room.innerHTML = `<option value="ALL">Tüm derslikler</option>` + ROOMS.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join("");
-  room.value = state.selectedRoom;
-}
-
-function startOptions(duration, selected = 0) {
-  return SLOTS.map(s => {
-    const err = Number(s.index) + Number(duration) > SLOTS.length || blockSlots(s.index, duration).some(slot => !SLOTS[slot] || SLOTS[slot].period !== s.period);
-    return `<option value="${s.index}" ${Number(selected) === s.index ? "selected" : ""} ${err ? "disabled" : ""}>${s.label}</option>`;
-  }).join("");
-}
-
-function roomOptions(course, selected = "109") {
-  return ROOMS.map(r => {
-    const disabled = course.year === 1 && r.id !== "109";
-    return `<option value="${r.id}" ${selected === r.id ? "selected" : ""} ${disabled ? "disabled" : ""}>${escapeHtml(r.name)}</option>`;
-  }).join("");
-}
-
-function dayOptions(selected = DAYS[0]) {
-  return DAYS.map(d => `<option value="${d}" ${selected === d ? "selected" : ""}>${d}</option>`).join("");
+  el.innerHTML = `<strong>Seçili ders:</strong> ${escapeHtml(course.code)} · ${escapeHtml(course.name)} <span>${duration} ders saati</span>`;
 }
 
 function renderMyCourses() {
   const target = $("myCourses");
-  const visibleCourses = COURSES
+  const courses = COURSES
     .filter(c => c.semester === state.selectedSemester)
     .filter(c => isAdmin() || state.assignments[c.id] === state.user.id)
     .sort((a, b) => a.code.localeCompare(b.code, "tr"));
 
-  if (!visibleCourses.length) {
-    target.innerHTML = `<div class="empty">Bu yarıyılda size atanmış ders bulunmuyor.</div>`;
+  if (!courses.length) {
+    target.innerHTML = `<div class="empty">Seçili yarıyıl için atanmış ders bulunmamaktadır.</div>`;
     return;
   }
 
-  target.innerHTML = `<div class="courseGrid">${visibleCourses.map(course => {
-    const assignedTeacher = state.assignments[course.id];
-    const partRows = partsFor(course.id).map((duration, idx) => {
+  target.innerHTML = courses.map(course => {
+    const parts = partsFor(course.id);
+    const partButtons = parts.map((duration, idx) => {
       const existing = bookingForCoursePart(course.id, idx);
-      const isActive = state.activePlacement?.courseId === course.id && Number(state.activePlacement?.partIndex) === idx;
       if (existing) {
-        return `<div class="courseAction booked">
-          <span class="partLabel">Parça ${idx + 1}</span>
-          <span class="pill ok">${existing.day} · ${SLOTS[existing.startSlot].label} · ${getRoom(existing.roomId)?.name}</span>
-          ${canDeleteBooking(existing) ? `<button class="small danger" type="button" data-action="delete-booking" data-course-id="${course.id}" data-part-index="${idx}">Kaldır</button>` : ""}
+        return `<div class="partRow placed">
+          <span>${existing.day} · ${SLOTS[existing.startSlot].label} · ${getRoom(existing.roomId)?.name}</span>
+          ${canDeleteBooking(existing) ? `<button type="button" class="mini danger" data-action="delete-booking" data-course-id="${course.id}" data-part-index="${idx}">Kaldır</button>` : ""}
         </div>`;
       }
-      return `<div class="courseAction" data-course-row="${course.id}__${idx}">
-        <span class="partLabel">${duration} ders saati</span>
-        <button class="small ${isActive ? "selected" : ""}" type="button" data-action="select-placement" data-course-id="${course.id}" data-part-index="${idx}">Tablodan yerleştir</button>
-        <select data-quick-day="${course.id}__${idx}">${dayOptions()}</select>
-        <select data-quick-slot="${course.id}__${idx}">${startOptions(duration)}</select>
-        <select data-quick-room="${course.id}__${idx}">${roomOptions(course, course.year === 1 ? "109" : "EK")}</select>
-        <button class="primary small" type="button" data-action="quick-book" data-course-id="${course.id}" data-part-index="${idx}">Yerleştir</button>
-      </div>`;
+      const active = state.activePlacement?.courseId === course.id && Number(state.activePlacement.partIndex) === idx;
+      return `<button type="button" class="placeBtn ${active ? "active" : ""}" data-action="select-placement" data-course-id="${course.id}" data-part-index="${idx}">${duration} ders saati yerleştir</button>`;
     }).join("");
 
-    return `<article class="courseCard">
-      <div class="courseHead">
-        <div>
-          <div class="courseTitle">${escapeHtml(courseLabel(course))}</div>
-          <div class="courseSub">${course.semester}. yarıyıl · T:${course.t} U:${course.u} · ${course.duration} ders saati · AKTS:${course.ects}</div>
-        </div>
-        <div>
-          ${course.electiveGroup ? `<span class="pill elective">${escapeHtml(course.electiveGroup)}</span>` : `<span class="pill gray">Zorunlu</span>`}
-          <span class="pill ${assignedTeacher ? "ok" : "warn"}">${escapeHtml(teacherName(assignedTeacher))}</span>
-        </div>
+    return `<article class="compactCourse">
+      <div>
+        <strong>${escapeHtml(course.code)}</strong>
+        <span>${escapeHtml(course.name)}</span>
+        <small>T:${course.t} U:${course.u} · ${course.electiveGroup ? escapeHtml(course.electiveGroup) : "Zorunlu"}</small>
       </div>
-      ${partRows}
+      ${partButtons}
     </article>`;
-  }).join("")}</div>`;
-}
-
-function teacherOptions(selected = "") {
-  return `<option value="">Atanmamış</option>` + visibleTeachers().map(u => `<option value="${escapeHtml(u.id)}" ${selected === u.id ? "selected" : ""}>${escapeHtml(teacherName(u.id))}</option>`).join("");
-}
-
-function renderAdmin() {
-  const panel = $("adminPanel");
-  if (!isAdmin()) {
-    panel.classList.add("hidden");
-    panel.innerHTML = "";
-    return;
-  }
-  panel.classList.remove("hidden");
-  const semesterCourses = COURSES.filter(c => c.semester === state.selectedSemester).sort((a, b) => a.code.localeCompare(b.code, "tr"));
-  const teacherRows = visibleTeachers().map(u => {
-    const assignedCourses = COURSES.filter(c => state.assignments[c.id] === u.id).map(c => c.code);
-    return `<div class="teacherRow">
-      <div>
-        <strong>${escapeHtml(teacherName(u.id))}</strong><br>
-        <span class="muted">${escapeHtml(u.email || u.username || u.id)}</span>
-      </div>
-      <div>${assignedCourses.length ? assignedCourses.map(code => `<span class="pill gray">${code}</span>`).join("") : `<span class="pill warn">Ders ataması yok</span>`}</div>
-    </div>`;
-  }).join("") || `<div class="empty">Henüz hoca yok.</div>`;
-
-  const courseChecks = semesterCourses.map(c => `<label class="checkboxItem">
-    <input type="checkbox" value="${c.id}" data-invite-course>
-    <span><strong>${c.code}</strong> · ${escapeHtml(c.name)}<br><small>${c.electiveGroup ? escapeHtml(c.electiveGroup) : "Zorunlu"} · ${c.duration} saat</small></span>
-  </label>`).join("");
-
-  const assignmentRows = semesterCourses.map(c => {
-    const partsValue = partsFor(c.id).join(",");
-    return `<div class="assignmentRow">
-      <div class="assignmentMeta">
-        <strong>${escapeHtml(courseLabel(c))}</strong><br>
-        <span class="muted">${c.semester}. yarıyıl · T:${c.t} U:${c.u} · toplam ${c.duration} saat ${c.electiveGroup ? `· ${escapeHtml(c.electiveGroup)}` : ""}</span>
-      </div>
-      <div class="assignmentControls">
-        <label>
-          Hoca
-          <select data-assignment-course="${c.id}">${teacherOptions(state.assignments[c.id] || "")}</select>
-        </label>
-        <label>
-          Parça
-          <input class="partInput" data-part-input="${c.id}" value="${escapeHtml(partsValue)}" title="Örn: 4 veya 2,2" />
-        </label>
-        <button class="small" type="button" data-action="save-parts" data-course-id="${c.id}">Kaydet</button>
-      </div>
-    </div>`;
   }).join("");
-
-  const inviteRows = state.invitations.length ? state.invitations.slice(-5).reverse().map(i => `<div class="teacherRow">
-    <div><strong>${escapeHtml(i.displayName || i.email)}</strong><br><span class="muted">${escapeHtml(i.email || "")}</span></div>
-    <span class="pill ${i.status === "accepted" ? "ok" : "gray"}">${escapeHtml(i.status || "bekliyor")}</span>
-  </div>`).join("") : `<div class="empty">Davet geçmişi boş.</div>`;
-
-  panel.innerHTML = `
-    <div class="sectionHead">
-      <div>
-        <h2>Yönetici paneli</h2>
-        <p class="muted">Hoca ekleme, davet gönderme, ders atama ve yalnızca yöneticiye açık ders parçalama işlemleri.</p>
-      </div>
-    </div>
-    <div class="adminGrid">
-      <div class="card">
-        <h3>Hoca ekle / davet gönder</h3>
-        <p class="muted">Firebase Functions kurulduğunda hoca e-posta linkinden kendi şifresini belirler. Demo modda gerçek e-posta gönderilmez.</p>
-        <form id="inviteTeacherForm" class="stackForm">
-          <div class="formGrid">
-            <label>Ad soyad<input name="displayName" required placeholder="Örn. Dr. A Hoca"></label>
-            <label>Unvan<input name="title" placeholder="Örn. Dr. Öğr. Üyesi"></label>
-            <label>E-posta / kullanıcı adı<input name="email" type="email" required placeholder="hoca@kastamonu.edu.tr"></label>
-            <label>Alternatif kullanıcı adı<input name="username" placeholder="Demo için isteğe bağlı"></label>
-            <label class="${state.mode === "firebase" ? "hidden" : ""}">Demo şifre<input name="demoPassword" value="123456"></label>
-          </div>
-          <label>Atanacak dersler · seçili yarıyıl</label>
-          <div class="checkboxGrid">${courseChecks}</div>
-          <button class="primary" type="submit">Hocayı ekle ve davet oluştur</button>
-        </form>
-        <div id="inviteResult" class="inviteResult hidden"></div>
-      </div>
-      <div class="card">
-        <h3>Hocalar</h3>
-        <div class="teacherList">${teacherRows}</div>
-        <hr>
-        <h3>Son davetler</h3>
-        <div class="teacherList">${inviteRows}</div>
-      </div>
-    </div>
-    <div class="card" style="margin-top:18px">
-      <h3>Ders-hoca atamaları ve parça kuralı</h3>
-      <p class="muted">Normal hocalar dersi parçalayamaz. Buradaki parça alanı yalnızca yönetici içindir. Örn. <code>4</code> tek blok, <code>2,2</code> iki ayrı blok.</p>
-      <div class="assignmentList">${assignmentRows}</div>
-    </div>`;
 }
 
 function renderSchedule() {
-  const target = $("scheduleGrid");
   const rooms = state.selectedRoom === "ALL" ? ROOMS : ROOMS.filter(r => r.id === state.selectedRoom);
-  target.innerHTML = rooms.map(room => {
+  $("scheduleGrid").innerHTML = rooms.map(room => {
     const rows = SLOTS.map(slot => `<tr>
       <th>${slot.label}</th>
       ${DAYS.map(day => renderScheduleCell(room.id, day, slot.index)).join("")}
     </tr>`).join("");
     return `<section class="roomBlock">
-      <div class="roomHeader">
-        <div>
-          <h3>${escapeHtml(room.name)}</h3>
-          <p class="muted">${escapeHtml(room.note || "")}</p>
-        </div>
-      </div>
-      <div class="tableWrap">
-        <table class="schedule">
-          <thead><tr><th>Saat</th>${DAYS.map(d => `<th>${d}</th>`).join("")}</tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
+      <div class="roomHeader"><h3>${escapeHtml(room.name)}</h3><span>${escapeHtml(room.note || "")}</span></div>
+      <table class="schedule">
+        <thead><tr><th>Saat</th>${DAYS.map(d => `<th>${d}</th>`).join("")}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
     </section>`;
   }).join("");
 }
@@ -818,100 +768,96 @@ function renderScheduleCell(roomId, day, slotIndex) {
   if (starts) {
     const course = getCourse(starts.courseId);
     return `<td class="busy">
-      <div class="bookingCode">${escapeHtml(course?.code || starts.courseId)}</div>
-      <div class="bookingName">${escapeHtml(course?.name || "")}</div>
-      <div class="bookingMeta">${escapeHtml(teacherName(starts.teacherId))}</div>
-      <div class="bookingMeta">${starts.duration} saat ${starts.electiveGroup ? `· ${escapeHtml(starts.electiveGroup)}` : ""}</div>
-      ${canDeleteBooking(starts) ? `<button class="small danger" type="button" data-action="delete-booking" data-course-id="${starts.courseId}" data-part-index="${starts.partIndex}">Kaldır</button>` : ""}
+      <strong>${escapeHtml(course?.code || starts.courseId)}</strong>
+      <span>${escapeHtml(course?.name || "")}</span>
+      <small>${escapeHtml(teacherName(starts.teacherId))}</small>
+      ${starts.electiveGroup ? `<em>${escapeHtml(starts.electiveGroup)}</em>` : ""}
+      ${canDeleteBooking(starts) ? `<button type="button" class="mini danger" data-action="delete-booking" data-course-id="${starts.courseId}" data-part-index="${starts.partIndex}">Sil</button>` : ""}
     </td>`;
   }
-  const covered = bookingCovering(roomId, day, slotIndex);
-  if (covered) return `<td class="busy cont">↳</td>`;
 
-  const active = state.activePlacement;
-  if (!active) return `<td class="free">Boş</td>`;
-  const course = getCourse(active.courseId);
-  const duration = partsFor(active.courseId)[active.partIndex];
-  const basicError = validateTimeBlock(course, roomId, day, slotIndex, duration);
-  if (basicError) return `<td class="free notFit" title="${escapeHtml(basicError)}">Uygun değil</td>`;
+  const covered = bookingCovering(roomId, day, slotIndex);
+  if (covered) return `<td class="busy continuation">↳</td>`;
+
+  if (!state.activePlacement) return `<td class="free">Boş</td>`;
+  const course = getCourse(state.activePlacement.courseId);
+  const duration = partsFor(course.id)[state.activePlacement.partIndex];
+  const error = validateTimeBlock(course, roomId, day, slotIndex, duration);
+  if (error) return `<td class="notFit" title="${escapeHtml(error)}">—</td>`;
   return `<td class="free clickable" data-action="grid-book" data-room-id="${roomId}" data-day="${day}" data-slot-index="${slotIndex}">
-    <span class="cellHint">${escapeHtml(course.code)} yerleştir</span>
-    <span class="muted">${duration} saatlik blok</span>
+    <strong>${escapeHtml(course.code)}</strong>
+    <span>Yerleştir</span>
   </td>`;
 }
 
-async function handleAppClick(event) {
-  const btn = event.target.closest("[data-action]");
-  if (!btn) return;
-  const action = btn.dataset.action;
+async function handleClick(event) {
+  const item = event.target.closest("[data-action]");
+  if (!item) return;
+  const action = item.dataset.action;
   try {
     if (action === "select-placement") {
-      state.activePlacement = { courseId: btn.dataset.courseId, partIndex: Number(btn.dataset.partIndex) };
+      state.activePlacement = { courseId: item.dataset.courseId, partIndex: Number(item.dataset.partIndex) };
       render();
-      toast("Ders seçildi. Program tablosunda uygun boş hücreye tıklayın.", "info");
-    }
-    if (action === "clear-active") {
-      state.activePlacement = null;
-      render();
-    }
-    if (action === "quick-book") {
-      const key = `${btn.dataset.courseId}__${btn.dataset.partIndex}`;
-      const day = document.querySelector(`[data-quick-day="${key}"]`)?.value;
-      const slot = document.querySelector(`[data-quick-slot="${key}"]`)?.value;
-      const room = document.querySelector(`[data-quick-room="${key}"]`)?.value;
-      await bookCourse(btn.dataset.courseId, Number(btn.dataset.partIndex), day, Number(slot), room);
+      toast("Ders seçildi. Program tablosunda uygun boş hücreye tıklayınız.", "info");
     }
     if (action === "grid-book") {
-      if (!state.activePlacement) throw new Error("Önce yerleştirilecek dersi seçin.");
-      await bookCourse(state.activePlacement.courseId, state.activePlacement.partIndex, btn.dataset.day, Number(btn.dataset.slotIndex), btn.dataset.roomId);
+      if (!state.activePlacement) throw new Error("Önce yerleştirilecek dersi seçiniz.");
+      await bookCourse(state.activePlacement.courseId, state.activePlacement.partIndex, item.dataset.day, Number(item.dataset.slotIndex), item.dataset.roomId);
     }
     if (action === "delete-booking") {
-      if (!confirm("Bu ders programdan kaldırılsın mı?")) return;
-      await deleteBooking(btn.dataset.courseId, Number(btn.dataset.partIndex));
+      if (!confirm("Seçilen ders programdan kaldırılsın mı?")) return;
+      await deleteBooking(item.dataset.courseId, Number(item.dataset.partIndex));
     }
     if (action === "save-parts") {
-      const input = document.querySelector(`[data-part-input="${btn.dataset.courseId}"]`);
-      await setCourseParts(btn.dataset.courseId, input.value);
+      const input = document.querySelector(`[data-part-input="${item.dataset.courseId}"]`);
+      await setCourseParts(item.dataset.courseId, input.value);
     }
   } catch (err) {
     console.error(err);
-    toast(err.message || "İşlem yapılamadı.", "error");
+    toast(err.message || "İşlem gerçekleştirilemedi.", "error");
   }
 }
 
-async function handleAppChange(event) {
+async function handleChange(event) {
   const assignment = event.target.closest("[data-assignment-course]");
-  if (!assignment) return;
-  try {
-    await setAssignment(assignment.dataset.assignmentCourse, assignment.value);
-  } catch (err) {
-    console.error(err);
-    toast(err.message || "Atama güncellenemedi.", "error");
+  if (assignment) {
+    try {
+      await setAssignment(assignment.dataset.assignmentCourse, assignment.value);
+    } catch (err) {
+      console.error(err);
+      toast(err.message || "Atama güncellenemedi.", "error");
+    }
+    return;
+  }
+
+  if (event.target.id === "adminSemesterSelect") {
+    state.selectedSemester = Number(event.target.value);
+    state.activePlacement = null;
+    render();
   }
 }
 
-async function handleAppSubmit(event) {
-  const form = event.target.closest("#inviteTeacherForm");
+async function handleSubmit(event) {
+  const form = event.target.closest("#createInstructorForm");
   if (!form) return;
   event.preventDefault();
   try {
-    await inviteTeacher(form);
+    await createInstructor(form);
     form.reset();
-    if (form.demoPassword) form.demoPassword.value = "123456";
   } catch (err) {
     console.error(err);
-    toast(err.message || "Davet işlemi yapılamadı.", "error");
+    toast(err.message || "Öğretim üyesi kaydı tamamlanamadı.", "error");
   }
 }
 
-function bindStaticEvents() {
-  $("loginForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
+function bindEvents() {
+  $("loginForm").addEventListener("submit", async (event) => {
+    event.preventDefault();
     const identifier = $("loginUser").value.trim();
     const password = $("loginPass").value;
     try {
-      if (state.mode === "firebase" && fb && identifier.includes("@")) await loginFirebase(identifier, password);
-      else await loginDemo(identifier, password);
+      if (state.mode === "firebase") await loginFirebase(identifier, password);
+      else await loginLocal(identifier, password);
       toast("Giriş başarılı.", "success");
     } catch (err) {
       console.error(err);
@@ -919,29 +865,34 @@ function bindStaticEvents() {
     }
   });
 
-  $("semesterFilter").addEventListener("change", (e) => {
-    state.selectedSemester = Number(e.target.value);
+  $("semesterFilter").addEventListener("change", (event) => {
+    state.selectedSemester = Number(event.target.value);
     state.activePlacement = null;
     render();
   });
-  $("roomFilter").addEventListener("change", (e) => {
-    state.selectedRoom = e.target.value;
+  $("roomFilter").addEventListener("change", (event) => {
+    state.selectedRoom = event.target.value;
     render();
   });
-  $("refreshBtn").addEventListener("click", () => loadData().catch(err => toast(err.message, "error")));
-  $("logoutBtn").addEventListener("click", () => logout().catch(err => toast(err.message, "error")));
   $("clearActiveBtn").addEventListener("click", () => {
     state.activePlacement = null;
     render();
   });
-  $("appPanel").addEventListener("click", handleAppClick);
-  $("appPanel").addEventListener("change", handleAppChange);
-  $("appPanel").addEventListener("submit", handleAppSubmit);
+  $("refreshBtn").addEventListener("click", () => loadData().catch(err => toast(err.message, "error")));
+  $("logoutBtn").addEventListener("click", () => logout().catch(err => toast(err.message, "error")));
+  $("appPanel").addEventListener("click", handleClick);
+  $("appPanel").addEventListener("change", handleChange);
+  $("appPanel").addEventListener("submit", handleSubmit);
 }
 
 async function init() {
-  await initFirebaseIfConfigured();
-  bindStaticEvents();
+  try {
+    await initFirebaseIfConfigured();
+  } catch (err) {
+    console.warn("Firebase başlatılamadı. Yerel kurulum denetimi moduna geçildi.", err);
+    state.mode = "local";
+  }
+  bindEvents();
   render();
 }
 

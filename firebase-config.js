@@ -1,20 +1,23 @@
-// Firebase'i kullanmak istediğinizde bu dosyadaki değerleri Firebase Console > Project settings > Web app config alanından doldurun.
-// Değerler boş/placeholder kalırsa uygulama sadece tarayıcı içi DEMO MODDA çalışır.
-// DEMO MOD gerçek çok-kullanıcılı değildir; ilk deneme ve arayüz testi içindir.
+// Firebase yapılandırması
+// GitHub Pages üzerinde ortak kullanıcı yönetimi ve ortak ders programı için Firebase kullanılmalıdır.
+// Kullanıcı adıyla girişte sistem, kullanıcı adını aşağıdaki kurumsal sanal alan adıyla e-posta formatına çevirir.
 
 export const firebaseConfig = {
   apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
   projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT.appspot.com",
+  storageBucket: "YOUR_PROJECT_ID.appspot.com",
   messagingSenderId: "YOUR_SENDER_ID",
   appId: "YOUR_APP_ID"
 };
 
-// İlk kurulum kolaylığı için. Nihai sürümde admin yetkisi Firestore users koleksiyonunda tutulmalıdır.
+// İlk yetkili kullanıcı Firebase Authentication içinde manuel oluşturulduktan sonra
+// bu listeye ilgili e-posta/sanal e-posta yazılır. Örn: "admin@dkby.kastamonu.edu.tr"
 export const adminEmails = [
-  "emre.akturk@kastamonu.edu.tr"
+  "admin@dkby.kastamonu.edu.tr"
 ];
 
-// Cloud Functions bölgesi. functions/index.js içindeki bölge ile aynı olmalı.
+// Kullanıcı adı "ayse.yilmaz" ise Firebase Auth e-postası "ayse.yilmaz@dkby.kastamonu.edu.tr" olur.
+export const authEmailDomain = "dkby.kastamonu.edu.tr";
+
 export const functionRegion = "europe-west1";
